@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Geometric Vault Shield (Center 54, 54) -->
+    <path
+        android:pathData="M54,26L74,34V52C74,65 65.5,76.8 54,81C42.5,76.8 34,65 34,52V34L54,26Z"
+        android:strokeWidth="2.5"
+        android:strokeColor="#38BDF8">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="34"
+                android:startY="26"
+                android:endX="74"
+                android:endY="81"
+                android:type="linear">
+                <item android:color="#331E3A8A" android:offset="0.0" />
+                <item android:color="#220F172A" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Stylized Rupee Symbol (₹) in crisp White -->
+    <!-- Top Horizontal Bar -->
+    <path
+        android:pathData="M44,40H64"
+        android:strokeWidth="3"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round" />
+
+    <!-- Second Horizontal Bar -->
+    <path
+        android:pathData="M44,46H60"
+        android:strokeWidth="3"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round" />
+
+    <!-- Curved Loop & Diagonal Downward Leg -->
+    <path
+        android:pathData="M49,40V51C49,55 57,55 57,51C57,48 53,46 49,46L61,66"
+        android:strokeWidth="3"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Dynamic Emerald Growth Trend Spark (Bottom Left to Top Right) -->
+    <path
+        android:pathData="M60,42L69,33M69,33H63M69,33V39"
+        android:strokeWidth="3"
+        android:strokeColor="#10B981"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Neon Glow Dot on Trend Spark -->
+    <path
+        android:pathData="M69,33m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0"
+        android:fillColor="#34D399" />
+
+</vector>
