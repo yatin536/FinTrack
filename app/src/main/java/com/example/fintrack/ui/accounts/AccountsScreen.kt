@@ -67,7 +67,7 @@ fun AccountsScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                 Text(
                     text = "Bank Accounts & Wallets",
                     style = MaterialTheme.typography.headlineMedium,
