@@ -66,7 +66,7 @@ fun AdjustBalanceDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text("Adjust Account Balance", fontWeight = FontWeight.Bold)
+            Text("Set Current Balance", fontWeight = FontWeight.Bold)
         },
         text = {
             Column {
@@ -75,7 +75,7 @@ fun AdjustBalanceDialog(
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
-                    text = "Future transactions will automatically add and subtract from this updated balance.",
+                    text = "Enter the actual balance currently present in your account. The app will immediately update to this balance, and future transactions will adjust from here.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
@@ -87,7 +87,7 @@ fun AdjustBalanceDialog(
                         balanceText = it
                         error = null
                     },
-                    label = { Text("Balance (₹)") },
+                    label = { Text("Current Balance (₹)") },
                     prefix = { Text("₹ ") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     isError = error != null,
@@ -108,7 +108,7 @@ fun AdjustBalanceDialog(
                     }
                 }
             ) {
-                Text("Update Balance")
+                Text("Save Current Balance")
             }
         },
         dismissButton = {

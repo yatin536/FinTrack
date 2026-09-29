@@ -73,10 +73,6 @@ class TransactionRepository(context: Context) {
         return dbHelper.insertTransaction(txn)
     }
 
-    suspend fun updateInitialBalance(accountId: String, newBalance: Double): Boolean {
-        return dbHelper.updateInitialBalance(accountId, newBalance)
-    }
-
     suspend fun updateTransactionCategory(
         transactionId: String,
         newCategoryId: String,
@@ -89,8 +85,20 @@ class TransactionRepository(context: Context) {
         return dbHelper.deleteTransaction(transactionId)
     }
 
-    suspend fun updateAccount(account: Account): Boolean {
-        return dbHelper.updateAccount(account)
+    suspend fun updateCurrentBalance(accountId: String, newBalance: Double): Boolean {
+        return dbHelper.updateCurrentBalance(accountId, newBalance)
+    }
+
+    suspend fun updateInitialBalance(accountId: String, newBalance: Double): Boolean {
+        return dbHelper.updateCurrentBalance(accountId, newBalance)
+    }
+
+    suspend fun updateAccount(account: Account, targetCurrentBalance: Double? = null): Boolean {
+        return dbHelper.updateAccount(account, targetCurrentBalance)
+    }
+
+    suspend fun deleteAccount(accountId: String): Boolean {
+        return dbHelper.deleteAccount(accountId)
     }
 
     suspend fun addAccount(account: Account): Boolean {

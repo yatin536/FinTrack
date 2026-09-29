@@ -251,28 +251,90 @@ class AppDatabaseHelper(context: Context) :
         return result != -1L
     }
 
-fun updateAccount(account: Account): Boolean {
+    fun deleteAccount(accountId: String): Boolean {
         val db = writableDatabase
+        db.delete(TABLE_TRANSACTIONS, "$COL_TXN_ACC_ID = ?", arrayOf(accountId))
+        val rows = db.delete(TABLE_ACCOUNTS, "$COL_ACC_ID = ?", arrayOf(accountId))
+        val remaining = getAccounts()
+        if (remaining.isNotEmpty() && remaining.none { it.isPrimary }) {
+            val first = remaining.first()
+            val values = ContentValues().apply {
+                put(COL_ACC_IS_PRIMARY, 1)
+            }
+            db.update(TABLE_ACCOUNTS, values, "$COL_ACC_ID = ?", arrayOf(first.id))
+        }
+        notifyDataChanged()
+        return rows > 0
+    }
+
+    fun getNetTransactions(accountId: String, accountType: AccountType): Double {
+        val db = readableDatabase
+        var net = 0.0
+        val cursor = db.query(
+            TABLE_TRANSACTIONS,
+            arrayOf(COL_TXN_AMOUNT, COL_TXN_TYPE),
+            "$COL_TXN_ACC_ID = ?",
+            arrayOf(accountId),
+            null,
+            null,
+            null
+        )
+        cursor.use { c ->
+            while (c.moveToNext()) {
+                val encryptedAmount = c.getString(c.getColumnIndexOrThrow(COL_TXN_AMOUNT))
+                val type = c.getString(c.getColumnIndexOrThrow(COL_TXN_TYPE))
+                val amount = SecurityManager.decryptDouble(encryptedAmount, 0.0)
+                if (accountType == AccountType.CREDIT_CARD) {
+                    if (type == TransactionType.DEBIT.name) {
+                        net += amount
+                    } else {
+                        net -= amount
+                    }
+                } else {
+                    if (type == TransactionType.CREDIT.name) {
+                        net += amount
+                    } else {
+                        net -= amount
+                    }
+                }
+            }
+        }
+        return net
+    }
+
+    fun updateCurrentBalance(accountId: String, newCurrentBalance: Double): Boolean {
+        val db = writableDatabase
+        val acc = getAccountById(accountId) ?: return false
+        val net = getNetTransactions(accountId, acc.accountType)
+        val calculatedInitial = newCurrentBalance - net
+        val values = ContentValues().apply {
+            put(COL_ACC_INIT_BAL, SecurityManager.encryptDouble(calculatedInitial))
+        }
+        val rows = db.update(TABLE_ACCOUNTS, values, "$COL_ACC_ID = ?", arrayOf(accountId))
+        notifyDataChanged()
+        return rows > 0
+    }
+
+    fun updateAccount(account: Account, targetCurrentBalance: Double? = null): Boolean {
+        val db = writableDatabase
+        val targetBal = targetCurrentBalance ?: account.currentBalance
+        val net = getNetTransactions(account.id, account.accountType)
+        val calculatedInitial = targetBal - net
         val values = ContentValues().apply {
             put(COL_ACC_NAME, account.name)
             put(COL_ACC_BANK, account.bankName)
             put(COL_ACC_TYPE, account.accountType.name)
             put(COL_ACC_LAST4, account.accountNumberLast4)
-            put(COL_ACC_INIT_BAL, SecurityManager.encryptDouble(account.initialBalance))
+            put(COL_ACC_INIT_BAL, SecurityManager.encryptDouble(calculatedInitial))
             put(COL_ACC_CREDIT_LIMIT, SecurityManager.encryptDouble(account.creditLimit))
         }
         val rows = db.update(TABLE_ACCOUNTS, values, "$COL_ACC_ID = ?", arrayOf(account.id))
         notifyDataChanged()
         return rows > 0
     }
+
     fun updateInitialBalance(accountId: String, newBalance: Double): Boolean {
-        val db = writableDatabase
-        val values = ContentValues().apply {
-            put(COL_ACC_INIT_BAL, SecurityManager.encryptDouble(newBalance))
-        }
-        val rows = db.update(TABLE_ACCOUNTS, values, "$COL_ACC_ID = ?", arrayOf(accountId))
-        notifyDataChanged()
-        return rows > 0
+        return updateCurrentBalance(accountId, newBalance)
     }
 
     fun getAccounts(): List<Account> {
@@ -295,8 +357,7 @@ fun updateAccount(account: Account): Boolean {
                 val isPrimary = c.getInt(c.getColumnIndexOrThrow(COL_ACC_IS_PRIMARY)) == 1
                 val created = c.getLong(c.getColumnIndexOrThrow(COL_ACC_CREATED))
 
-                // Calculate current balance: Initial + Sum(Credits) - Sum(Debits)
-                val currentBal = calculateAccountBalance(id, initBal)
+                val currentBal = calculateAccountBalance(id, accountType, initBal)
 
                 accounts.add(
                     Account(
@@ -333,31 +394,9 @@ fun updateAccount(account: Account): Boolean {
             ?: accounts.firstOrNull()
     }
 
-    private fun calculateAccountBalance(accountId: String, initialBalance: Double): Double {
-        val db = readableDatabase
-        var balance = initialBalance
-        val cursor = db.query(
-            TABLE_TRANSACTIONS,
-            arrayOf(COL_TXN_AMOUNT, COL_TXN_TYPE),
-            "$COL_TXN_ACC_ID = ?",
-            arrayOf(accountId),
-            null,
-            null,
-            null
-        )
-        cursor.use { c ->
-            while (c.moveToNext()) {
-                val encryptedAmount = c.getString(c.getColumnIndexOrThrow(COL_TXN_AMOUNT))
-                val type = c.getString(c.getColumnIndexOrThrow(COL_TXN_TYPE))
-                val amount = SecurityManager.decryptDouble(encryptedAmount, 0.0)
-                if (type == TransactionType.CREDIT.name) {
-                    balance += amount
-                } else {
-                    balance -= amount
-                }
-            }
-        }
-        return balance
+    private fun calculateAccountBalance(accountId: String, accountType: AccountType, initialBalance: Double): Double {
+        val net = getNetTransactions(accountId, accountType)
+        return initialBalance + net
     }
 
     // ==========================================
@@ -563,7 +602,7 @@ fun updateAccount(account: Account): Boolean {
 
     fun getDashboardSummary(period: TimePeriod): DashboardSummary {
         val accounts = getAccounts()
-        val totalBalance = accounts.sumOf { it.currentBalance }
+        val totalBalance = accounts.filter { it.accountType != AccountType.CREDIT_CARD }.sumOf { it.currentBalance }
         val categories = getCategories().associateBy { it.id }
 
         val cal = Calendar.getInstance()

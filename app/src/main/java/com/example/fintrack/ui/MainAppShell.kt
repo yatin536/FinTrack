@@ -193,18 +193,23 @@ fun MainAppShell(
                                         snackbarHostState.showSnackbar("Account added: $name")
                                     }
                                 },
-                                onEditAccount = { account, name, bank, type, last4, initBal, limit ->
+                                onEditAccount = { account, name, bank, type, last4, curBal, limit ->
                                     coroutineScope.launch {
                                         val updated = account.copy(
                                             name = name,
                                             bankName = bank,
                                             accountType = type,
                                             accountNumberLast4 = last4,
-                                            initialBalance = initBal,
                                             creditLimit = limit
                                         )
-                                        repository.updateAccount(updated)
-                                        snackbarHostState.showSnackbar("Account updated")
+                                        repository.updateAccount(updated, curBal)
+                                        snackbarHostState.showSnackbar("Account updated: $name")
+                                    }
+                                },
+                                onDeleteAccount = { account ->
+                                    coroutineScope.launch {
+                                        repository.deleteAccount(account.id)
+                                        snackbarHostState.showSnackbar("Account deleted: ${account.name}")
                                     }
                                 }
                             )
@@ -220,7 +225,7 @@ fun MainAppShell(
                     onDismiss = { adjustingAccount = null },
                     onConfirm = { newBal ->
                         coroutineScope.launch {
-                            repository.updateInitialBalance(account.id, newBal)
+                            repository.updateCurrentBalance(account.id, newBal)
                             adjustingAccount = null
                             snackbarHostState.showSnackbar("Balance updated for ${account.name}")
                         }
