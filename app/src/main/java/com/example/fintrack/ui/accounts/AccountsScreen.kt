@@ -42,6 +42,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.fintrack.data.model.Account
+import com.example.fintrack.data.model.AccountType
 import java.util.Locale
 import java.util.UUID
 
@@ -49,7 +50,7 @@ import java.util.UUID
 fun AccountsScreen(
     accounts: List<Account>,
     onAdjustBalanceClick: (Account) -> Unit,
-    onAddAccount: (name: String, bankName: String, last4: String, initialBalance: Double) -> Unit,
+    onAddAccount: (name: String, bankName: String, type: AccountType, last4: String, initialBalance: Double, creditLimit: Double) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showAddAccountDialog by remember { mutableStateOf(false) }
@@ -123,8 +124,8 @@ fun AccountsScreen(
     if (showAddAccountDialog) {
         AddNewAccountDialog(
             onDismiss = { showAddAccountDialog = false },
-            onConfirm = { name, bank, last4, balance ->
-                onAddAccount(name, bank, last4, balance)
+            onConfirm = { name, bank, type, last4, balance, limit ->
+                onAddAccount(name, bank, type, last4, balance, limit)
                 showAddAccountDialog = false
             }
         )
@@ -136,12 +137,25 @@ fun AccountCard(
     account: Account,
     onAdjustBalance: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+    val isCreditCard = account.accountType == AccountType.CREDIT_CARD
+    
+    val cardGradient = if (isCreditCard) {
+        androidx.compose.ui.graphics.Brush.linearGradient(
+            colors = listOf(Color(0xFF1E293B), Color(0xFF0F172A))
         )
+    } else {
+        androidx.compose.ui.graphics.Brush.linearGradient(
+            colors = listOf(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+        )
+    }
+    val textColor = if (isCreditCard) Color.White else MaterialTheme.colorScheme.onSurface
+    val subTextColor = if (isCreditCard) Color.LightGray else MaterialTheme.colorScheme.onSurfaceVariant
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(cardGradient)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -154,13 +168,13 @@ fun AccountCard(
                         modifier = Modifier
                             .size(38.dp)
                             .clip(CircleShape)
-                            .background(Color(account.colorHex).copy(alpha = 0.2f)),
+                            .background(Color.White.copy(alpha=0.2f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = AppIcons.Bank,
+                            imageVector = if (isCreditCard) AppIcons.CreditCard else AppIcons.Bank,
                             contentDescription = account.name,
-                            tint = Color(account.colorHex),
+                            tint = if (isCreditCard) Color.White else Color(account.colorHex),
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -171,13 +185,14 @@ fun AccountCard(
                         Text(
                             text = account.name,
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            color = textColor
                         )
                         if (account.accountNumberLast4.isNotEmpty()) {
                             Text(
-                                text = "A/c ending ••${account.accountNumberLast4}",
+                                text = (if(isCreditCard) "Card ending ••" else "A/c ending ••") + account.accountNumberLast4,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = subTextColor
                             )
                         }
                     }
@@ -187,7 +202,8 @@ fun AccountCard(
                     onClick = onAdjustBalance,
                     shape = RoundedCornerShape(10.dp),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    modifier = Modifier.height(32.dp)
+                    modifier = Modifier.height(32.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = textColor)
                 ) {
                     Icon(
                         imageVector = AppIcons.Edit,
@@ -201,62 +217,117 @@ fun AccountCard(
 
             Spacer(Modifier.height(14.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text(
-                        text = "Current Balance",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "₹${String.format(Locale.getDefault(), "%,.2f", account.currentBalance)}",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
+            if (isCreditCard) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = "Limit Used",
+                            fontSize = 11.sp,
+                            color = subTextColor
+                        )
+                        Text(
+                            text = "₹${String.format(java.util.Locale.getDefault(), "%,.2f", account.currentBalance)}",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor
+                        )
+                    }
 
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = "Base Opening Balance",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "₹${String.format(Locale.getDefault(), "%,.2f", account.initialBalance)}",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "Available Limit",
+                            fontSize = 11.sp,
+                            color = subTextColor
+                        )
+                        Text(
+                            text = "₹${String.format(java.util.Locale.getDefault(), "%,.2f", account.limitLeft)}",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = subTextColor
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = "Current Balance",
+                            fontSize = 11.sp,
+                            color = subTextColor
+                        )
+                        Text(
+                            text = "₹${String.format(java.util.Locale.getDefault(), "%,.2f", account.currentBalance)}",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor
+                        )
+                    }
+
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "Base Opening Balance",
+                            fontSize = 11.sp,
+                            color = subTextColor
+                        )
+                        Text(
+                            text = "₹${String.format(java.util.Locale.getDefault(), "%,.2f", account.initialBalance)}",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = subTextColor
+                        )
+                    }
                 }
             }
         }
     }
 }
-
 @Composable
 fun AddNewAccountDialog(
     onDismiss: () -> Unit,
-    onConfirm: (name: String, bankName: String, last4: String, initialBalance: Double) -> Unit
+    onConfirm: (name: String, bankName: String, type: AccountType, last4: String, initialBalance: Double, creditLimit: Double) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var bankName by remember { mutableStateOf("") }
     var last4 by remember { mutableStateOf("") }
     var balanceText by remember { mutableStateOf("") }
+    var limitText by remember { mutableStateOf("") }
+    var type by remember { mutableStateOf(AccountType.BANK) }
     var error by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Bank / Wallet", fontWeight = FontWeight.Bold) },
+        title = { Text("Add Account / Card", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // We mock segmented button by regular row of buttons for simplicity without relying on beta APIs if not available
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { type = AccountType.BANK },
+                        modifier = Modifier.weight(1f),
+                        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (type == AccountType.BANK) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+                        )
+                    ) { Text("Bank", fontSize=12.sp) }
+                    
+                    OutlinedButton(
+                        onClick = { type = AccountType.CREDIT_CARD },
+                        modifier = Modifier.weight(1f),
+                        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (type == AccountType.CREDIT_CARD) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+                        )
+                    ) { Text("Credit Card", fontSize=12.sp) }
+                }
+
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Account Label (e.g. HDFC Salary)") },
+                    label = { Text(if (type == AccountType.CREDIT_CARD) "Card Label (e.g. HDFC Millennia)" else "Account Label (e.g. HDFC Salary)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -264,7 +335,7 @@ fun AddNewAccountDialog(
                 OutlinedTextField(
                     value = bankName,
                     onValueChange = { bankName = it },
-                    label = { Text("Bank Name (HDFC, SBI, ICICI, etc.)") },
+                    label = { Text("Bank Name (HDFC, SBI, etc.)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -272,23 +343,41 @@ fun AddNewAccountDialog(
                 OutlinedTextField(
                     value = last4,
                     onValueChange = { if (it.length <= 4) last4 = it },
-                    label = { Text("Last 4 digits of A/c (optional)") },
+                    label = { Text("Last 4 digits (optional)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                OutlinedTextField(
-                    value = balanceText,
-                    onValueChange = { balanceText = it; error = null },
-                    label = { Text("Opening Balance (₹)") },
-                    prefix = { Text("₹ ") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    isError = error != null,
-                    supportingText = { error?.let { Text(it) } },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                
+                if (type == AccountType.CREDIT_CARD) {
+                    OutlinedTextField(
+                        value = limitText,
+                        onValueChange = { limitText = it },
+                        label = { Text("Credit Limit (₹)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = balanceText,
+                        onValueChange = { balanceText = it },
+                        label = { Text("Amount Owed / Used (₹)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = balanceText,
+                        onValueChange = { balanceText = it; error = null },
+                        label = { Text("Opening Balance (₹)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        isError = error != null,
+                        supportingText = { error?.let { Text(it) } },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         },
         confirmButton = {
@@ -299,10 +388,11 @@ fun AddNewAccountDialog(
                         return@Button
                     }
                     val bal = balanceText.toDoubleOrNull() ?: 0.0
-                    onConfirm(name, bankName.ifBlank { "Bank" }, last4, bal)
+                    val lim = limitText.toDoubleOrNull() ?: 0.0
+                    onConfirm(name, bankName.ifBlank { "Bank" }, type, last4, bal, lim)
                 }
             ) {
-                Text("Add Account")
+                Text("Add")
             }
         },
         dismissButton = {

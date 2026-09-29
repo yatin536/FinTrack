@@ -1,5 +1,9 @@
 package com.example.fintrack.ui.auth
 
+import androidx.fragment.app.FragmentActivity
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -55,6 +59,42 @@ fun AuthScreen(
         if (lockoutSeconds > 0) {
             kotlinx.coroutines.delay(1000L)
             lockoutSeconds--
+        }
+    }
+
+    val context = LocalContext.current
+    val fragmentActivity = context as? FragmentActivity
+
+    val showBiometricPrompt = {
+        if (fragmentActivity != null && !isSettingUp) {
+            val executor = ContextCompat.getMainExecutor(context)
+            val biometricPrompt = BiometricPrompt(fragmentActivity, executor,
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        super.onAuthenticationSucceeded(result)
+                        onAuthenticated()
+                    }
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        super.onAuthenticationError(errorCode, errString)
+                        errorMessage = errString.toString()
+                    }
+                })
+            
+            val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Unlock FinTrack")
+                .setSubtitle("Confirm your identity to access your vault")
+                .setNegativeButtonText("Use PIN")
+                .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK)
+                .build()
+                
+            biometricPrompt.authenticate(promptInfo)
+        }
+    }
+    
+    // Auto-prompt on launch if PIN is already set
+    LaunchedEffect(Unit) {
+        if (!isSettingUp) {
+            showBiometricPrompt()
         }
     }
 
@@ -216,7 +256,24 @@ fun AuthScreen(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(modifier = Modifier.size(72.dp)) // Spacer
+                                        if (!isSettingUp) {
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(CircleShape)
+                                .clickable { showBiometricPrompt() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = AppIcons.Fingerprint,
+                                contentDescription = "Biometric",
+                                modifier = Modifier.size(32.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    } else {
+                        Box(modifier = Modifier.size(72.dp)) // Spacer
+                    }
 
                     KeypadButton(text = "0", onClick = { handleDigit("0") })
 

@@ -3,7 +3,7 @@ package com.example.fintrack
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,7 +21,7 @@ import com.example.fintrack.data.local.ThemePreferenceManager
 import com.example.fintrack.theme.FinTrackTheme
 import com.example.fintrack.ui.MainAppShell
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     private val requestSmsPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()

@@ -6,6 +6,7 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.example.fintrack.data.model.Account
+import com.example.fintrack.data.model.AccountType
 import com.example.fintrack.data.model.Category
 import com.example.fintrack.data.model.CategorySpend
 import com.example.fintrack.data.model.DashboardSummary
@@ -33,7 +34,7 @@ class AppDatabaseHelper(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "fintrack_secure.db"
-        const val DATABASE_VERSION = 1
+        const val DATABASE_VERSION = 2
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -54,7 +55,9 @@ class AppDatabaseHelper(context: Context) :
         private const val COL_ACC_ID = "id"
         private const val COL_ACC_NAME = "name"
         private const val COL_ACC_BANK = "bank_name"
-        private const val COL_ACC_LAST4 = "account_number_last4"
+                private const val COL_ACC_LAST4 = "account_number_last4"
+        private const val COL_ACC_TYPE = "account_type"
+        private const val COL_ACC_CREDIT_LIMIT = "credit_limit" // Encrypted
         private const val COL_ACC_INIT_BAL = "initial_balance" // Encrypted
         private const val COL_ACC_COLOR = "color_hex"
         private const val COL_ACC_IS_PRIMARY = "is_primary"
@@ -106,8 +109,10 @@ class AppDatabaseHelper(context: Context) :
                 $COL_ACC_ID TEXT PRIMARY KEY,
                 $COL_ACC_NAME TEXT NOT NULL,
                 $COL_ACC_BANK TEXT NOT NULL,
+                $COL_ACC_TYPE TEXT NOT NULL DEFAULT 'BANK',
                 $COL_ACC_LAST4 TEXT,
                 $COL_ACC_INIT_BAL TEXT NOT NULL,
+                $COL_ACC_CREDIT_LIMIT TEXT NOT NULL,
                 $COL_ACC_COLOR INTEGER NOT NULL,
                 $COL_ACC_IS_PRIMARY INTEGER NOT NULL DEFAULT 0,
                 $COL_ACC_CREATED INTEGER NOT NULL
@@ -174,7 +179,11 @@ class AppDatabaseHelper(context: Context) :
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Migration logic for future updates
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE $TABLE_ACCOUNTS ADD COLUMN $COL_ACC_TYPE TEXT NOT NULL DEFAULT 'BANK'")
+            val encryptedZero = SecurityManager.encryptDouble(0.0)
+            db.execSQL("ALTER TABLE $TABLE_ACCOUNTS ADD COLUMN $COL_ACC_CREDIT_LIMIT TEXT NOT NULL DEFAULT '$encryptedZero'")
+        }
     }
 
     private fun seedDefaultCategories(db: SQLiteDatabase) {
@@ -196,7 +205,9 @@ class AppDatabaseHelper(context: Context) :
             id = "default_primary_account",
             name = "Primary Bank Account",
             bankName = "General",
+            accountType = AccountType.BANK,
             accountNumberLast4 = "",
+            creditLimit = 0.0,
             initialBalance = 0.0,
             currentBalance = 0.0,
             colorHex = 0xFF1E88E5,
@@ -206,7 +217,9 @@ class AppDatabaseHelper(context: Context) :
             put(COL_ACC_ID, defaultAccount.id)
             put(COL_ACC_NAME, defaultAccount.name)
             put(COL_ACC_BANK, defaultAccount.bankName)
+            put(COL_ACC_TYPE, defaultAccount.accountType.name)
             put(COL_ACC_LAST4, defaultAccount.accountNumberLast4)
+            put(COL_ACC_CREDIT_LIMIT, SecurityManager.encryptDouble(defaultAccount.creditLimit))
             put(COL_ACC_INIT_BAL, SecurityManager.encryptDouble(defaultAccount.initialBalance))
             put(COL_ACC_COLOR, defaultAccount.colorHex)
             put(COL_ACC_IS_PRIMARY, 1)
@@ -225,7 +238,9 @@ class AppDatabaseHelper(context: Context) :
             put(COL_ACC_ID, account.id)
             put(COL_ACC_NAME, account.name)
             put(COL_ACC_BANK, account.bankName)
+            put(COL_ACC_TYPE, account.accountType.name)
             put(COL_ACC_LAST4, account.accountNumberLast4)
+            put(COL_ACC_CREDIT_LIMIT, SecurityManager.encryptDouble(account.creditLimit))
             put(COL_ACC_INIT_BAL, SecurityManager.encryptDouble(account.initialBalance))
             put(COL_ACC_COLOR, account.colorHex)
             put(COL_ACC_IS_PRIMARY, if (account.isPrimary) 1 else 0)
@@ -255,8 +270,12 @@ class AppDatabaseHelper(context: Context) :
                 val id = c.getString(c.getColumnIndexOrThrow(COL_ACC_ID))
                 val name = c.getString(c.getColumnIndexOrThrow(COL_ACC_NAME))
                 val bank = c.getString(c.getColumnIndexOrThrow(COL_ACC_BANK))
+                val typeStr = c.getString(c.getColumnIndexOrThrow(COL_ACC_TYPE)) ?: "BANK"
+                val accountType = try { AccountType.valueOf(typeStr) } catch(e: Exception) { AccountType.BANK }
                 val last4 = c.getString(c.getColumnIndexOrThrow(COL_ACC_LAST4)) ?: ""
                 val encryptedInitBal = c.getString(c.getColumnIndexOrThrow(COL_ACC_INIT_BAL))
+                val encryptedLimit = c.getString(c.getColumnIndexOrThrow(COL_ACC_CREDIT_LIMIT))
+                val creditLimit = if (encryptedLimit != null) SecurityManager.decryptDouble(encryptedLimit, 0.0) else 0.0
                 val initBal = SecurityManager.decryptDouble(encryptedInitBal, 0.0)
                 val color = c.getLong(c.getColumnIndexOrThrow(COL_ACC_COLOR))
                 val isPrimary = c.getInt(c.getColumnIndexOrThrow(COL_ACC_IS_PRIMARY)) == 1
@@ -270,7 +289,9 @@ class AppDatabaseHelper(context: Context) :
                         id = id,
                         name = name,
                         bankName = bank,
+                        accountType = accountType,
                         accountNumberLast4 = last4,
+                        creditLimit = creditLimit,
                         initialBalance = initBal,
                         currentBalance = currentBal,
                         colorHex = color,

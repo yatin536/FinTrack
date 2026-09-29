@@ -206,6 +206,89 @@ object AppIcons {
         }.build()
     }
 
+        val CreditCard: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "CreditCard",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(20f, 4f)
+                horizontalLineTo(4f)
+                curveTo(2.89f, 4f, 2.01f, 4.89f, 2.01f, 6f)
+                lineTo(2f, 18f)
+                curveTo(2f, 19.11f, 2.89f, 20f, 4f, 20f)
+                horizontalLineTo(20f)
+                curveTo(21.11f, 20f, 22f, 19.11f, 22f, 18f)
+                verticalLineTo(6f)
+                curveTo(22f, 4.89f, 21.11f, 4f, 20f, 4f)
+                close()
+                moveTo(20f, 18f)
+                horizontalLineTo(4f)
+                verticalLineTo(12f)
+                horizontalLineTo(20f)
+                verticalLineTo(18f)
+                close()
+                moveTo(20f, 8f)
+                horizontalLineTo(4f)
+                verticalLineTo(6f)
+                horizontalLineTo(20f)
+                verticalLineTo(8f)
+                close()
+            }
+        }.build()
+    }
+
+        val Fingerprint: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Fingerprint",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(17.81f, 4.47f)
+                curveToRelative(-0.08f, 0f, -0.16f, -0.02f, -0.23f, -0.06f)
+                curveTo(15.66f, 3.42f, 14f, 3f, 12.01f, 3f)
+                curveToRelative(-1.98f, 0f, -3.86f, 0.47f, -5.57f, 1.41f)
+                curveToRelative(-0.24f, 0.13f, -0.54f, 0.04f, -0.68f, -0.2f)
+                curveToRelative(-0.13f, -0.24f, -0.04f, -0.55f, 0.2f, -0.68f)
+                curveTo(7.82f, 2.52f, 9.86f, 2f, 12.01f, 2f)
+                curveToRelative(2.13f, 0f, 3.99f, 0.47f, 6.03f, 1.52f)
+                curveToRelative(0.25f, 0.13f, 0.34f, 0.43f, 0.21f, 0.67f)
+                curveToRelative(-0.09f, 0.18f, -0.26f, 0.28f, -0.44f, 0.28f)
+                close()
+                moveTo(3.5f, 9.72f)
+                curveToRelative(-0.1f, 0f, -0.2f, -0.03f, -0.29f, -0.09f)
+                curveToRelative(-0.23f, -0.16f, -0.28f, -0.47f, -0.12f, -0.7f)
+                curveToRelative(0.99f, -1.4f, 2.25f, -2.5f, 3.67f, -3.22f)
+                curveToRelative(3.47f, -1.73f, 8.16f, -1.73f, 11.58f, -0.01f)
+                curveToRelative(0.25f, 0.12f, 0.35f, 0.43f, 0.22f, 0.67f)
+                curveToRelative(-0.12f, 0.25f, -0.43f, 0.35f, -0.67f, 0.22f)
+                curveToRelative(-3.16f, -1.58f, -7.49f, -1.58f, -10.68f, 0.01f)
+                curveTo(6.01f, 7.23f, 4.89f, 8.21f, 3.99f, 9.48f)
+                curveToRelative(-0.1f, 0.14f, -0.26f, 0.24f, -0.49f, 0.24f)
+                close()
+                moveTo(9.73f, 21.79f)
+                curveToRelative(-0.08f, 0f, -0.17f, -0.02f, -0.25f, -0.07f)
+                curveToRelative(-0.23f, -0.13f, -0.32f, -0.43f, -0.18f, -0.66f)
+                curveToRelative(1.15f, -1.94f, 1.83f, -4.01f, 1.83f, -6.11f)
+                curveToRelative(0f, -1.66f, -0.83f, -3.15f, -2.26f, -4.06f)
+                curveToRelative(-1.9f, -1.21f, -4.43f, -1.21f, -6.32f, 0f)
+                curveToRelative(-0.23f, 0.15f, -0.53f, 0.08f, -0.68f, -0.15f)
+                curveToRelative(-0.15f, -0.23f, -0.08f, -0.53f, 0.15f, -0.68f)
+                curveToRelative(2.21f, -1.41f, 5.14f, -1.41f, 7.39f, 0f)
+                curveToRelative(1.68f, 1.07f, 2.65f, 2.82f, 2.65f, 4.79f)
+                curveToRelative(0f, 2.27f, -0.73f, 4.5f, -1.97f, 6.6f)
+                curveToRelative(-0.11f, 0.2f, -0.34f, 0.34f, -0.36f, 0.34f)
+                close()
+            }
+        }.build()
+    }
+
     val Add: ImageVector by lazy {
         ImageVector.Builder(
             name = "Add",

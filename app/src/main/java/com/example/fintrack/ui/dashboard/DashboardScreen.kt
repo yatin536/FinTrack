@@ -442,7 +442,9 @@ fun TransactionRow(
 
                 Column {
                     Text(
-                        text = txn.merchant,
+                        text = if (isDebit && !txn.isManual && !txn.merchant.contains("Payment", true) && !txn.merchant.contains("Withdrawal", true)) "Paid to: ${txn.merchant}" 
+                               else if (!isDebit && !txn.isManual && !txn.merchant.contains("Credit", true)) "Received from: ${txn.merchant}" 
+                               else txn.merchant,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1

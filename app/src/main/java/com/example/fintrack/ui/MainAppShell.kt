@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import com.example.fintrack.data.local.PinManager
 import com.example.fintrack.data.model.Account
+import com.example.fintrack.data.model.AccountType
 import com.example.fintrack.data.model.TimePeriod
 import com.example.fintrack.data.model.TransactionWithDetails
 import com.example.fintrack.data.repository.TransactionRepository
@@ -176,14 +177,16 @@ fun MainAppShell(
                             AccountsScreen(
                                 accounts = accounts,
                                 onAdjustBalanceClick = { adjustingAccount = it },
-                                onAddAccount = { name, bank, last4, initBal ->
+                                onAddAccount = { name, bank, type, last4, initBal, limit ->
                                     coroutineScope.launch {
                                         val newAcc = Account(
                                             id = UUID.randomUUID().toString(),
                                             name = name,
                                             bankName = bank,
+                                            accountType = type,
                                             accountNumberLast4 = last4,
                                             initialBalance = initBal,
+                                            creditLimit = limit,
                                             colorHex = 0xFF2563EB
                                         )
                                         repository.addAccount(newAcc)
