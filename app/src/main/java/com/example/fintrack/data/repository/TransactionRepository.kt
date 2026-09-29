@@ -89,6 +89,10 @@ class TransactionRepository(context: Context) {
         return dbHelper.deleteTransaction(transactionId)
     }
 
+    suspend fun updateAccount(account: Account): Boolean {
+        return dbHelper.updateAccount(account)
+    }
+
     suspend fun addAccount(account: Account): Boolean {
         return dbHelper.insertAccount(account)
     }

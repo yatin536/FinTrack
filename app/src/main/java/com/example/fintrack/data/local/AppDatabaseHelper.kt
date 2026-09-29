@@ -251,6 +251,20 @@ class AppDatabaseHelper(context: Context) :
         return result != -1L
     }
 
+fun updateAccount(account: Account): Boolean {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put(COL_ACC_NAME, account.name)
+            put(COL_ACC_BANK, account.bankName)
+            put(COL_ACC_TYPE, account.accountType.name)
+            put(COL_ACC_LAST4, account.accountNumberLast4)
+            put(COL_ACC_INIT_BAL, SecurityManager.encryptDouble(account.initialBalance))
+            put(COL_ACC_CREDIT_LIMIT, SecurityManager.encryptDouble(account.creditLimit))
+        }
+        val rows = db.update(TABLE_ACCOUNTS, values, "$COL_ACC_ID = ?", arrayOf(account.id))
+        notifyDataChanged()
+        return rows > 0
+    }
     fun updateInitialBalance(accountId: String, newBalance: Double): Boolean {
         val db = writableDatabase
         val values = ContentValues().apply {

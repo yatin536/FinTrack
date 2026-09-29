@@ -192,6 +192,20 @@ fun MainAppShell(
                                         repository.addAccount(newAcc)
                                         snackbarHostState.showSnackbar("Account added: $name")
                                     }
+                                },
+                                onEditAccount = { account, name, bank, type, last4, initBal, limit ->
+                                    coroutineScope.launch {
+                                        val updated = account.copy(
+                                            name = name,
+                                            bankName = bank,
+                                            accountType = type,
+                                            accountNumberLast4 = last4,
+                                            initialBalance = initBal,
+                                            creditLimit = limit
+                                        )
+                                        repository.updateAccount(updated)
+                                        snackbarHostState.showSnackbar("Account updated")
+                                    }
                                 }
                             )
                         }

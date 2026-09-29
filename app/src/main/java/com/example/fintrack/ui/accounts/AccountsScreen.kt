@@ -24,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -51,9 +52,11 @@ fun AccountsScreen(
     accounts: List<Account>,
     onAdjustBalanceClick: (Account) -> Unit,
     onAddAccount: (name: String, bankName: String, type: AccountType, last4: String, initialBalance: Double, creditLimit: Double) -> Unit,
+    onEditAccount: (Account, name: String, bankName: String, type: AccountType, last4: String, initialBalance: Double, creditLimit: Double) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showAddAccountDialog by remember { mutableStateOf(false) }
+    var accountToEdit by remember { mutableStateOf<Account?>(null) }
 
     Column(
         modifier = modifier
@@ -115,7 +118,8 @@ fun AccountsScreen(
             items(accounts, key = { it.id }) { acc ->
                 AccountCard(
                     account = acc,
-                    onAdjustBalance = { onAdjustBalanceClick(acc) }
+                    onAdjustBalance = { onAdjustBalanceClick(acc) },
+                    onEditClick = { accountToEdit = acc }
                 )
             }
         }
@@ -130,12 +134,23 @@ fun AccountsScreen(
             }
         )
     }
+    if (accountToEdit != null) {
+        AddNewAccountDialog(
+            initialAccount = accountToEdit,
+            onDismiss = { accountToEdit = null },
+            onConfirm = { name, bank, type, last4, balance, limit ->
+                onEditAccount(accountToEdit!!, name, bank, type, last4, balance, limit)
+                accountToEdit = null
+            }
+        )
+    }
 }
 
 @Composable
 fun AccountCard(
     account: Account,
-    onAdjustBalance: () -> Unit
+    onAdjustBalance: () -> Unit,
+    onEditClick: () -> Unit = {}
 ) {
     val isCreditCard = account.accountType == AccountType.CREDIT_CARD
     
@@ -181,7 +196,7 @@ fun AccountCard(
 
                     Spacer(Modifier.width(12.dp))
 
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = account.name,
                             style = MaterialTheme.typography.titleMedium,
@@ -195,6 +210,9 @@ fun AccountCard(
                                 color = subTextColor
                             )
                         }
+                    }
+                    IconButton(onClick = onEditClick, modifier = Modifier.size(32.dp)) {
+                        Icon(imageVector = AppIcons.Edit, contentDescription = "Edit", tint = subTextColor, modifier = Modifier.size(16.dp))
                     }
                 }
 
@@ -289,20 +307,21 @@ fun AccountCard(
 }
 @Composable
 fun AddNewAccountDialog(
+    initialAccount: Account? = null,
     onDismiss: () -> Unit,
     onConfirm: (name: String, bankName: String, type: AccountType, last4: String, initialBalance: Double, creditLimit: Double) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
-    var bankName by remember { mutableStateOf("") }
-    var last4 by remember { mutableStateOf("") }
-    var balanceText by remember { mutableStateOf("") }
-    var limitText by remember { mutableStateOf("") }
-    var type by remember { mutableStateOf(AccountType.BANK) }
+    var name by remember { mutableStateOf(initialAccount?.name ?: "") }
+    var bankName by remember { mutableStateOf(initialAccount?.bankName ?: "") }
+    var last4 by remember { mutableStateOf(initialAccount?.accountNumberLast4 ?: "") }
+    var balanceText by remember { mutableStateOf(initialAccount?.initialBalance?.let { if(it==0.0) "" else it.toString() } ?: "") }
+    var limitText by remember { mutableStateOf(initialAccount?.creditLimit?.let { if(it==0.0) "" else it.toString() } ?: "") }
+    var type by remember { mutableStateOf(initialAccount?.accountType ?: AccountType.BANK) }
     var error by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Account / Card", fontWeight = FontWeight.Bold) },
+        title = { Text(if (initialAccount != null) "Edit Account / Card" else "Add Account / Card", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 // We mock segmented button by regular row of buttons for simplicity without relying on beta APIs if not available
@@ -392,7 +411,7 @@ fun AddNewAccountDialog(
                     onConfirm(name, bankName.ifBlank { "Bank" }, type, last4, bal, lim)
                 }
             ) {
-                Text("Add")
+                Text(if (initialAccount != null) "Save" else "Add")
             }
         },
         dismissButton = {
