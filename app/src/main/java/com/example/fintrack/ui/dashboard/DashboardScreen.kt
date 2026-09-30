@@ -24,7 +24,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,10 +33,6 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,11 +42,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.fintrack.data.model.Account
-import com.example.fintrack.data.model.Category
+import com.example.fintrack.data.model.AccountType
 import com.example.fintrack.data.model.DashboardSummary
 import com.example.fintrack.data.model.TimePeriod
-import com.example.fintrack.data.model.TransactionType
+import com.example.fintrack.data.model.TransactionDirection
+import com.example.fintrack.data.model.TransactionKind
 import com.example.fintrack.data.model.TransactionWithDetails
+import com.example.fintrack.data.model.UpcomingCreditCardDue
 import com.example.fintrack.ui.components.CategoryBreakdownView
 import com.example.fintrack.ui.components.TrendBarChart
 import java.text.SimpleDateFormat
@@ -65,6 +62,7 @@ fun DashboardScreen(
     selectedPeriod: TimePeriod,
     onPeriodSelected: (TimePeriod) -> Unit,
     onAdjustBalanceClick: (Account) -> Unit,
+    onPayCreditCardClick: (Account) -> Unit = {},
     onTransactionClick: (TransactionWithDetails) -> Unit,
     onSimulateSmsClick: () -> Unit,
     onAddManualClick: () -> Unit,
@@ -88,7 +86,7 @@ fun DashboardScreen(
             ) {
                 Column {
                     Text(
-                        text = "My Finances",
+                        text = "FinTrack Ledger",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -104,7 +102,7 @@ fun DashboardScreen(
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "Offline & Encrypted (AES-256)",
+                            text = "100% Local & Encrypted (AES-256)",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -120,15 +118,27 @@ fun DashboardScreen(
             }
         }
 
-        // Modern Balance Card
+        // Multi-Account Financial Balance & Net Worth Card
         item {
             BalanceCard(
                 totalBalance = summary.totalBalance,
+                creditCardOutstanding = summary.creditCardOutstanding,
+                netWorth = summary.netWorth,
                 account = primaryAccount,
                 onAdjustBalance = {
                     primaryAccount?.let { onAdjustBalanceClick(it) }
                 }
             )
+        }
+
+        // Upcoming Credit Card Dues (if any)
+        if (summary.upcomingCreditCardDues.isNotEmpty()) {
+            item {
+                UpcomingDuesCard(
+                    dues = summary.upcomingCreditCardDues,
+                    onPayCard = onPayCreditCardClick
+                )
+            }
         }
 
         // Time Period Switcher (Daily / Monthly / Yearly)
@@ -252,48 +262,58 @@ fun DashboardScreen(
 @Composable
 fun BalanceCard(
     totalBalance: Double,
+    creditCardOutstanding: Double,
+    netWorth: Double,
     account: Account?,
     onAdjustBalance: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Color.Transparent
-        )
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(
-                    Brush.horizontalGradient(
-                        colors = listOf(Color(0xFF1E3A8A), Color(0xFF2563EB), Color(0xFF3B82F6))
+                    Brush.linearGradient(
+                        colors = listOf(Color(0xFF0F172A), Color(0xFF1E293B), Color(0xFF1E3A8A))
                     )
                 )
                 .padding(20.dp)
         ) {
             Column {
+                // Top row: Net worth label & Primary adjust button
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Total Balance",
-                        color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Column {
+                        Text(
+                            text = "Net Liquid Worth",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "₹${String.format(Locale.getDefault(), "%,.2f", netWorth)}",
+                            color = Color.White,
+                            fontSize = 30.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
 
                     Button(
                         onClick = onAdjustBalance,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.White.copy(alpha = 0.2f),
+                            containerColor = Color.White.copy(alpha = 0.15f),
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        modifier = Modifier.height(32.dp)
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.height(34.dp)
                     ) {
                         Icon(
                             imageVector = AppIcons.Edit,
@@ -301,37 +321,164 @@ fun BalanceCard(
                             modifier = Modifier.size(14.dp)
                         )
                         Spacer(Modifier.width(4.dp))
-                        Text("Set Balance", fontSize = 12.sp)
+                        Text("Set Bank", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(16.dp))
 
-                Text(
-                    text = "₹${String.format(Locale.getDefault(), "%,.2f", totalBalance)}",
-                    color = Color.White,
-                    fontSize = 32.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-
-                Spacer(Modifier.height(14.dp))
-
+                // Breakdown: Bank Assets vs CC Liabilities
                 Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Bank Accounts Asset
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF10B981))
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = "Bank Balance",
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.75f),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            text = "₹${String.format(Locale.getDefault(), "%,.2f", totalBalance)}",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF34D399)
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(32.dp)
+                            .background(Color.White.copy(alpha = 0.15f))
+                    )
+
+                    // Credit Card Outstanding Liability
+                    Column(horizontalAlignment = Alignment.End) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFF87171))
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = "Cards Due",
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.75f),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            text = "₹${String.format(Locale.getDefault(), "%,.2f", creditCardOutstanding)}",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (creditCardOutstanding > 0) Color(0xFFFCA5A5) else Color.White.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun UpcomingDuesCard(
+    dues: List<UpcomingCreditCardDue>,
+    onPayCard: (Account) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = AppIcons.Bank,
-                        contentDescription = "Bank",
-                        tint = Color.White.copy(alpha = 0.9f),
-                        modifier = Modifier.size(16.dp)
+                        imageVector = AppIcons.CreditCard,
+                        contentDescription = "Credit Card Dues",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text(
-                        text = account?.displayName ?: "Primary Account",
-                        color = Color.White.copy(alpha = 0.9f),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
+                        text = "Upcoming Credit Card Dues",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error
                     )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            dues.forEach { due ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = due.account.name,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            text = "Due: ${due.dueDate} • Min ₹${String.format(Locale.getDefault(), "%,.0f", due.minimumDue)}",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "₹${String.format(Locale.getDefault(), "%,.2f", due.totalDue)}",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Button(
+                            onClick = { onPayCard(due.account) },
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(28.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Text("Pay Bill", fontSize = 11.sp, color = MaterialTheme.colorScheme.onError)
+                        }
+                    }
                 }
             }
         }
@@ -399,8 +546,22 @@ fun TransactionRow(
 ) {
     val txn = transactionWithDetails.transaction
     val category = transactionWithDetails.category
-    val isDebit = txn.type == TransactionType.DEBIT
+    val isDebit = txn.direction == TransactionDirection.DEBIT
+    val isCardPurchase = txn.kind == TransactionKind.CARD_PURCHASE
+    val isCardPayment = txn.kind == TransactionKind.CARD_PAYMENT
+    val isTransfer = txn.kind == TransactionKind.BANK_TRANSFER
+    val isRefund = txn.kind == TransactionKind.REFUND || txn.kind == TransactionKind.REVERSAL
+
     val df = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
+
+    val kindBadgeColor = when {
+        txn.needsReview -> Color(0xFFF59E0B) // Amber
+        isCardPurchase -> Color(0xFFEC4899) // Pink / Magenta
+        isCardPayment -> Color(0xFF8B5CF6) // Purple
+        isTransfer -> Color(0xFF3B82F6) // Blue
+        isRefund -> Color(0xFF10B981) // Green
+        else -> Color(category.colorHex)
+    }
 
     Card(
         modifier = Modifier
@@ -422,40 +583,78 @@ fun TransactionRow(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f)
             ) {
-                // Category color badge
+                // Kind or Category Icon badge
                 Box(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
-                        .background(Color(category.colorHex).copy(alpha = 0.2f)),
+                        .background(kindBadgeColor.copy(alpha = 0.15f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(18.dp)
-                            .clip(CircleShape)
-                            .background(Color(category.colorHex))
+                    val icon = when {
+                        isCardPurchase || isCardPayment -> AppIcons.CreditCard
+                        isTransfer -> AppIcons.ArrowForward
+                        isRefund -> AppIcons.Check
+                        else -> AppIcons.Bank
+                    }
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = txn.kind.name,
+                        tint = kindBadgeColor,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 
                 Spacer(Modifier.width(12.dp))
 
                 Column {
+                    // Title
+                    val title = when (txn.kind) {
+                        TransactionKind.CARD_PURCHASE -> "Card Spend: ${txn.merchant}"
+                        TransactionKind.CARD_PAYMENT -> "Credit Card Payment"
+                        TransactionKind.BANK_TRANSFER -> "Bank Transfer: ${txn.merchant}"
+                        TransactionKind.REFUND -> "Refund: ${txn.merchant}"
+                        TransactionKind.REVERSAL -> "Reversal: ${txn.merchant}"
+                        TransactionKind.ATM_WITHDRAWAL -> "ATM Cash Withdrawal"
+                        else -> {
+                            if (isDebit && !txn.isManual && !txn.merchant.contains("Payment", true)) "Paid to: ${txn.merchant}"
+                            else if (!isDebit && !txn.isManual) "Received: ${txn.merchant}"
+                            else txn.merchant
+                        }
+                    }
+
                     Text(
-                        text = if (isDebit && !txn.isManual && !txn.merchant.contains("Payment", true) && !txn.merchant.contains("Withdrawal", true)) "Paid to: ${txn.merchant}" 
-                               else if (!isDebit && !txn.isManual && !txn.merchant.contains("Credit", true)) "Received from: ${txn.merchant}" 
-                               else txn.merchant,
+                        text = title,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1
                     )
+
+                    // Subtitle metadata row
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = category.name,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(category.colorHex)
-                        )
+                        if (txn.needsReview) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFFF59E0B).copy(alpha = 0.2f),
+                                modifier = Modifier.padding(end = 4.dp)
+                            ) {
+                                Text(
+                                    text = "Needs Review",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFD97706),
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = category.name,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(category.colorHex)
+                            )
+                        }
+
                         Text(
                             text = " • ${df.format(Date(txn.timestamp))}",
                             fontSize = 11.sp,
@@ -466,26 +665,43 @@ fun TransactionRow(
             }
 
             Column(horizontalAlignment = Alignment.End) {
+                val amountColor = when {
+                    isCardPayment -> Color(0xFF8B5CF6)
+                    isTransfer -> Color(0xFF3B82F6)
+                    isRefund -> Color(0xFF10B981)
+                    isDebit -> Color(0xFFEF4444)
+                    else -> Color(0xFF10B981)
+                }
+
+                val sign = when {
+                    isCardPayment || isTransfer -> ""
+                    isDebit -> "-"
+                    else -> "+"
+                }
+
                 Text(
-                    text = "${if (isDebit) "-" else "+"}₹${String.format(Locale.getDefault(), "%,.2f", txn.amount)}",
+                    text = "$sign₹${String.format(Locale.getDefault(), "%,.2f", txn.amount)}",
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Bold,
-                    color = if (isDebit) Color(0xFFEF4444) else Color(0xFF10B981)
+                    color = amountColor
                 )
 
-                if (txn.isManual) {
-                    Text(
-                        text = "Cash / Manual",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else if (transactionWithDetails.account.accountNumberLast4.isNotEmpty()) {
-                    Text(
-                        text = "••${transactionWithDetails.account.accountNumberLast4}",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                val accountInfo = transactionWithDetails.account
+                val label = if (accountInfo.accountType == AccountType.CREDIT_CARD) {
+                    "Card ••${accountInfo.accountNumberLast4}"
+                } else if (txn.isManual) {
+                    "Cash / Manual"
+                } else if (accountInfo.accountNumberLast4.isNotEmpty()) {
+                    "A/c ••${accountInfo.accountNumberLast4}"
+                } else {
+                    accountInfo.name
                 }
+
+                Text(
+                    text = label,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

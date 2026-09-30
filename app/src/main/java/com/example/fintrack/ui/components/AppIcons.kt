@@ -533,4 +533,102 @@ object AppIcons {
         }.build()
     }
 
+
+    val ArrowForward: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "ArrowForward",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(12f, 4f)
+                lineToRelative(-1.41f, 1.41f)
+                lineTo(16.17f, 11f)
+                horizontalLineTo(4f)
+                verticalLineToRelative(2f)
+                horizontalLineToRelative(12.17f)
+                lineToRelative(-5.58f, 5.59f)
+                lineTo(12f, 20f)
+                lineToRelative(8f, -8f)
+                close()
+            }
+        }.build()
+    }
+
+    val ArrowBack: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "ArrowBack",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(20f, 11f)
+                horizontalLineTo(7.83f)
+                lineToRelative(5.59f, -5.59f)
+                lineTo(12f, 4f)
+                lineToRelative(-8f, 8f)
+                lineToRelative(8f, 8f)
+                lineToRelative(1.41f, -1.41f)
+                lineTo(7.83f, 13f)
+                horizontalLineTo(20f)
+                verticalLineToRelative(-2f)
+                close()
+            }
+        }.build()
+    }
+
+    val Warning: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Warning",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(1f, 21f)
+                horizontalLineToRelative(22f)
+                lineTo(12f, 2f)
+                lineTo(1f, 21f)
+                close()
+                moveTo(13f, 18f)
+                horizontalLineToRelative(-2f)
+                verticalLineToRelative(-2f)
+                horizontalLineToRelative(2f)
+                verticalLineToRelative(2f)
+                close()
+                moveTo(13f, 14f)
+                horizontalLineToRelative(-2f)
+                verticalLineToRelative(-4f)
+                horizontalLineToRelative(2f)
+                verticalLineToRelative(4f)
+                close()
+            }
+        }.build()
+    }
+
+    val Check: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Check",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(9f, 16.17f)
+                lineTo(4.83f, 12f)
+                lineToRelative(-1.42f, 1.41f)
+                lineTo(9f, 19f)
+                lineTo(21f, 7f)
+                lineToRelative(-1.41f, -1.41f)
+                close()
+            }
+        }.build()
+    }
+
 }
