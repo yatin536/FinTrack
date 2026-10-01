@@ -22,6 +22,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
@@ -220,7 +221,7 @@ fun AddTransactionDialog(
                         label = { Text("Category") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryExpanded) },
                         modifier = Modifier
-                            .menuAnchor()
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, true)
                             .fillMaxWidth()
                     )
                     ExposedDropdownMenu(
@@ -252,7 +253,7 @@ fun AddTransactionDialog(
                         label = { Text("Account / Wallet") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = accountExpanded) },
                         modifier = Modifier
-                            .menuAnchor()
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, true)
                             .fillMaxWidth()
                     )
                     ExposedDropdownMenu(
@@ -370,90 +371,6 @@ fun ChangeCategoryDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
-}
-
-/**
- * Built-in Interactive SMS Simulation Dialog.
- * Allows trying Indian bank messages (HDFC, SBI, ICICI, etc.) with 1 tap.
- */
-@Composable
-fun SimulateSmsDialog(
-    onDismiss: () -> Unit,
-    onSimulate: (sender: String, message: String) -> Unit
-) {
-    val presets = listOf(
-        Pair(
-            "HDFC Bank - Swiggy (₹450)",
-            Pair("VK-HDFCBK", "Rs 450.00 debited from HDFC Bank a/c **1234 on 28-SEP-26 to VPA swiggy@icici (UPI Ref: 426189). Avl Bal: INR 12,450.00")
-        ),
-        Pair(
-            "SBI - Zomato (₹1,200)",
-            Pair("AD-SBIINB", "Dear SBI User, your A/c ending 5678 debited by Rs.1,200.00 on 28Sep26 transfer to ZOMATO Ref No 426189218920. Avail Bal Rs: 25,600.50")
-        ),
-        Pair(
-            "ICICI Bank - Amazon (₹850)",
-            Pair("VM-ICICIB", "Acct XX9012 debited for Rs 850.00 on 28-Sep-26. UPI:426189. Info:AMAZON PAY. Available Balance INR 40,120.00")
-        ),
-        Pair(
-            "Salary Credit (₹75,000)",
-            Pair("VK-HDFCBK", "Your a/c no. XX1234 is credited for Rs 75,000.00 on 28-09-26 by salary. Avail Bal Rs: 82,450.00 - HDFC Bank")
-        ),
-        Pair(
-            "ATM Cash Withdrawal (₹2,000)",
-            Pair("AD-SBIINB", "Rs 2,000.00 withdrawn at ATM from a/c **4321 on 28-SEP-26. Avl Bal Rs: 10,450.00")
-        )
-    )
-
-    var customSender by remember { mutableStateOf("VK-HDFCBK") }
-    var customMessage by remember { mutableStateOf(presets[0].second.second) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Simulate Bank SMS", fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "Pick a sample Indian bank alert or enter your own SMS:",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                presets.forEach { (label, data) ->
-                    OutlinedButton(
-                        onClick = {
-                            customSender = data.first
-                            customMessage = data.second
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(label, fontSize = 12.sp)
-                    }
-                }
-
-                Spacer(Modifier.height(4.dp))
-
-                OutlinedTextField(
-                    value = customMessage,
-                    onValueChange = { customMessage = it },
-                    label = { Text("SMS Content") },
-                    maxLines = 4,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    onSimulate(customSender, customMessage)
-                }
-            ) {
-                Text("Process SMS")
-            }
-        },
-        dismissButton = {
-            OutlinedButton(onClick = onDismiss) { Text("Close") }
         }
     )
 }

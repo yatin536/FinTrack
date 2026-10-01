@@ -4,6 +4,7 @@ import java.util.UUID
 
 data class ReconciliationLog(
     val id: String = UUID.randomUUID().toString(),
+    val userId: String = User.DEFAULT_USER_ID,
     val accountId: String,
     val ledgerBalance: Double,
     val confirmedBalance: Double,

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import com.example.fintrack.ui.components.AppIcons
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,28 +44,34 @@ import com.example.fintrack.data.local.PinManager
 import com.example.fintrack.data.model.Account
 import com.example.fintrack.data.model.AccountType
 import com.example.fintrack.data.model.BankAccountType
-import com.example.fintrack.data.model.SmsAlertStatus
 import com.example.fintrack.data.model.TimePeriod
 import com.example.fintrack.data.model.TransactionWithDetails
+import com.example.fintrack.data.model.VerificationStatus
 import com.example.fintrack.data.repository.TransactionRepository
 import com.example.fintrack.ui.accounts.AccountsScreen
 import com.example.fintrack.ui.accounts.CreditCardDetailsScreen
-import com.example.fintrack.ui.alerts.SmsIntelligenceScreen
 import com.example.fintrack.ui.auth.AuthScreen
 import com.example.fintrack.ui.components.AddTransactionDialog
 import com.example.fintrack.ui.components.AdjustBalanceDialog
+import com.example.fintrack.ui.components.AppIcons
+import com.example.fintrack.ui.components.BillPaidDialog
 import com.example.fintrack.ui.components.ChangeCategoryDialog
-import com.example.fintrack.ui.components.PayCreditCardDialog
-import com.example.fintrack.ui.components.SimulateSmsDialog
 import com.example.fintrack.ui.dashboard.DashboardScreen
+import com.example.fintrack.ui.intelligence.IntelligenceCenterScreen
+import com.example.fintrack.ui.profile.ProfileSettingsScreen
+import com.example.fintrack.ui.splash.SplashScreen
 import com.example.fintrack.ui.transactions.TransactionsScreen
+import com.example.fintrack.ui.verification.VerificationScreen
 import kotlinx.coroutines.launch
 import java.util.UUID
 
 enum class AppTab {
     DASHBOARD,
     TRANSACTIONS,
-    ACCOUNTS
+    ACCOUNTS,
+    VERIFICATION,
+    INTELLIGENCE,
+    SETTINGS
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,6 +86,7 @@ fun MainAppShell(
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    var showSplash by remember { mutableStateOf(true) }
     var isAuthenticated by remember { mutableStateOf(!pinManager.isPinSet) }
     var currentTab by remember { mutableStateOf(AppTab.DASHBOARD) }
     var selectedPeriod by remember { mutableStateOf(TimePeriod.MONTHLY) }
@@ -88,23 +94,30 @@ fun MainAppShell(
     // Screen Navigation States
     var selectedCreditCard by remember { mutableStateOf<Account?>(null) }
     var payingCreditCard by remember { mutableStateOf<Account?>(null) }
-    var showSmsIntelligence by remember { mutableStateOf(false) }
 
     // Active Dialog States
     var adjustingAccount by remember { mutableStateOf<Account?>(null) }
     var editingCategoryTxn by remember { mutableStateOf<TransactionWithDetails?>(null) }
     var showAddTxnDialog by remember { mutableStateOf(false) }
-    var showSimulateSmsDialog by remember { mutableStateOf(false) }
+
+    // Multi-User active key for refreshing
+    var userRefreshTrigger by remember { mutableStateOf(0) }
 
     // Reactive State Flows from Repository
     val summary by repository.getDashboardSummary(selectedPeriod).collectAsState(initial = com.example.fintrack.data.model.DashboardSummary())
     val transactions by repository.getTransactions().collectAsState(initial = emptyList())
     val accounts by repository.getAccounts().collectAsState(initial = emptyList())
     val categories by repository.getCategories().collectAsState(initial = emptyList())
-    val alerts by repository.getImportedSmsAlerts().collectAsState(initial = emptyList())
+    val verificationEvents by repository.getVerificationEvents().collectAsState(initial = emptyList())
+    val insights by repository.getFinancialInsights().collectAsState(initial = emptyList())
 
-    val pendingAlertCount = remember(alerts) {
-        alerts.count { it.status == SmsAlertStatus.NEEDS_REVIEW }
+    val pendingVerificationCount = remember(verificationEvents) {
+        verificationEvents.count { it.status == VerificationStatus.PENDING }
+    }
+
+    if (showSplash) {
+        SplashScreen(onSplashFinished = { showSplash = false })
+        return
     }
 
     Crossfade(targetState = isAuthenticated, label = "AuthCrossfade") { authenticated ->
@@ -131,7 +144,7 @@ fun MainAppShell(
                                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                                 ) {
                                     Text(
-                                        text = "V2",
+                                        text = "V2 PRO",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -144,23 +157,6 @@ fun MainAppShell(
                             containerColor = MaterialTheme.colorScheme.background
                         ),
                         actions = {
-                            // SMS Intelligence action with notification badge
-                            IconButton(onClick = { showSmsIntelligence = !showSmsIntelligence }) {
-                                BadgedBox(
-                                    badge = {
-                                        if (pendingAlertCount > 0) {
-                                            Badge { Text("$pendingAlertCount") }
-                                        }
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = if (pendingAlertCount > 0) AppIcons.Warning else AppIcons.Activity,
-                                        contentDescription = "SMS Intelligence",
-                                        tint = if (pendingAlertCount > 0) Color(0xFFF59E0B) else MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-
                             IconButton(onClick = onToggleDarkMode) {
                                 Icon(
                                     imageVector = if (isDark) AppIcons.LightMode else AppIcons.DarkMode,
@@ -183,39 +179,73 @@ fun MainAppShell(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     ) {
                         NavigationBarItem(
-                            selected = currentTab == AppTab.DASHBOARD && !showSmsIntelligence && selectedCreditCard == null,
+                            selected = currentTab == AppTab.DASHBOARD && selectedCreditCard == null,
                             onClick = {
                                 currentTab = AppTab.DASHBOARD
-                                showSmsIntelligence = false
                                 selectedCreditCard = null
                             },
                             icon = { Icon(AppIcons.Dashboard, contentDescription = "Dashboard") },
-                            label = { Text("Dashboard") }
+                            label = { Text("Home", fontSize = 11.sp) }
                         )
                         NavigationBarItem(
-                            selected = currentTab == AppTab.TRANSACTIONS && !showSmsIntelligence && selectedCreditCard == null,
+                            selected = currentTab == AppTab.TRANSACTIONS && selectedCreditCard == null,
                             onClick = {
                                 currentTab = AppTab.TRANSACTIONS
-                                showSmsIntelligence = false
                                 selectedCreditCard = null
                             },
                             icon = { Icon(AppIcons.Activity, contentDescription = "Transactions") },
-                            label = { Text("Activity") }
+                            label = { Text("Activity", fontSize = 11.sp) }
                         )
                         NavigationBarItem(
-                            selected = currentTab == AppTab.ACCOUNTS && !showSmsIntelligence && selectedCreditCard == null,
+                            selected = currentTab == AppTab.ACCOUNTS && selectedCreditCard == null,
                             onClick = {
                                 currentTab = AppTab.ACCOUNTS
-                                showSmsIntelligence = false
                                 selectedCreditCard = null
                             },
                             icon = { Icon(AppIcons.Bank, contentDescription = "Accounts") },
-                            label = { Text("Accounts") }
+                            label = { Text("Accounts", fontSize = 11.sp) }
+                        )
+                        NavigationBarItem(
+                            selected = currentTab == AppTab.VERIFICATION && selectedCreditCard == null,
+                            onClick = {
+                                currentTab = AppTab.VERIFICATION
+                                selectedCreditCard = null
+                            },
+                            icon = {
+                                BadgedBox(
+                                    badge = {
+                                        if (pendingVerificationCount > 0) {
+                                            Badge { Text("$pendingVerificationCount") }
+                                        }
+                                    }
+                                ) {
+                                    Icon(AppIcons.CheckCircle, contentDescription = "Verification")
+                                }
+                            },
+                            label = { Text("Verify", fontSize = 11.sp) }
+                        )
+                        NavigationBarItem(
+                            selected = currentTab == AppTab.INTELLIGENCE && selectedCreditCard == null,
+                            onClick = {
+                                currentTab = AppTab.INTELLIGENCE
+                                selectedCreditCard = null
+                            },
+                            icon = { Icon(AppIcons.TrendingUp, contentDescription = "Intelligence") },
+                            label = { Text("Insights", fontSize = 11.sp) }
+                        )
+                        NavigationBarItem(
+                            selected = currentTab == AppTab.SETTINGS && selectedCreditCard == null,
+                            onClick = {
+                                currentTab = AppTab.SETTINGS
+                                selectedCreditCard = null
+                            },
+                            icon = { Icon(AppIcons.Person, contentDescription = "Settings") },
+                            label = { Text("Profile", fontSize = 11.sp) }
                         )
                     }
                 },
                 floatingActionButton = {
-                    if (!showSmsIntelligence && selectedCreditCard == null) {
+                    if (selectedCreditCard == null && (currentTab == AppTab.DASHBOARD || currentTab == AppTab.TRANSACTIONS)) {
                         FloatingActionButton(
                             onClick = { showAddTxnDialog = true },
                             containerColor = MaterialTheme.colorScheme.primary,
@@ -228,19 +258,6 @@ fun MainAppShell(
             ) { innerPadding ->
                 Box(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
                     when {
-                        showSmsIntelligence -> {
-                            SmsIntelligenceScreen(
-                                alerts = alerts,
-                                accounts = accounts,
-                                onResolveAlert = { alertId, selectedAccountId ->
-                                    coroutineScope.launch {
-                                        repository.resolveAlert(alertId, selectedAccountId)
-                                        snackbarHostState.showSnackbar("Alert resolved and transaction linked!")
-                                    }
-                                },
-                                onBackClick = { showSmsIntelligence = false }
-                            )
-                        }
                         selectedCreditCard != null -> {
                             val activeCard = accounts.firstOrNull { it.id == selectedCreditCard!!.id } ?: selectedCreditCard!!
                             val cardTxns = transactions.filter {
@@ -255,7 +272,7 @@ fun MainAppShell(
                                 onBackClick = { selectedCreditCard = null },
                                 onPayCardClick = { payingCreditCard = activeCard },
                                 onAdjustBalanceClick = { adjustingAccount = activeCard },
-                                onEditClick = { /* Can edit via accounts tab */ },
+                                onEditClick = { /* Handled in accounts tab */ },
                                 onDeleteClick = {
                                     coroutineScope.launch {
                                         repository.deleteAccount(activeCard.id)
@@ -272,10 +289,11 @@ fun MainAppShell(
                                 selectedPeriod = selectedPeriod,
                                 onPeriodSelected = { selectedPeriod = it },
                                 onAdjustBalanceClick = { adjustingAccount = it },
-                                onPayCreditCardClick = { payingCreditCard = it },
+                                onMarkBillPaidClick = { payingCreditCard = it },
                                 onTransactionClick = { editingCategoryTxn = it },
-                                onSimulateSmsClick = { showSimulateSmsDialog = true },
-                                onAddManualClick = { showAddTxnDialog = true }
+                                onAddManualClick = { showAddTxnDialog = true },
+                                pendingVerificationCount = pendingVerificationCount,
+                                onNavigateToVerification = { currentTab = AppTab.VERIFICATION }
                             )
                         }
                         currentTab == AppTab.TRANSACTIONS -> {
@@ -290,7 +308,7 @@ fun MainAppShell(
                                 accounts = accounts,
                                 onAdjustBalanceClick = { adjustingAccount = it },
                                 onCardClick = { selectedCreditCard = it },
-                                onPayCardClick = { payingCreditCard = it },
+                                onMarkBillPaidClick = { payingCreditCard = it },
                                 onAddAccount = { name, bank, type, subType, last4, initBal, limit, stmt, due ->
                                     coroutineScope.launch {
                                         val newAcc = Account(
@@ -335,11 +353,42 @@ fun MainAppShell(
                                 }
                             )
                         }
+                        currentTab == AppTab.VERIFICATION -> {
+                            VerificationScreen(
+                                verificationEvents = verificationEvents,
+                                accounts = accounts,
+                                onResolveEvent = { eventId, status, selectedAccountId ->
+                                    coroutineScope.launch {
+                                        repository.resolveVerificationEvent(eventId, status, selectedAccountId)
+                                        snackbarHostState.showSnackbar("Verification status updated: ${status.name}")
+                                    }
+                                }
+                            )
+                        }
+                        currentTab == AppTab.INTELLIGENCE -> {
+                            IntelligenceCenterScreen(
+                                repository = repository,
+                                insights = insights,
+                                onNavigateToVerification = { currentTab = AppTab.VERIFICATION },
+                                onNavigateToAccounts = { currentTab = AppTab.ACCOUNTS }
+                            )
+                        }
+                        currentTab == AppTab.SETTINGS -> {
+                            ProfileSettingsScreen(
+                                repository = repository,
+                                onUserSwitched = {
+                                    userRefreshTrigger++
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("Active profile switched!")
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
             }
 
-            // Dialogs
+            // Dialog: Adjust Balance
             adjustingAccount?.let { account ->
                 AdjustBalanceDialog(
                     account = account,
@@ -354,27 +403,33 @@ fun MainAppShell(
                 )
             }
 
+            // Dialog: Mark Credit Card Bill Paid
             payingCreditCard?.let { card ->
                 val bankAccounts = accounts.filter { it.accountType == AccountType.BANK_ACCOUNT }
-                PayCreditCardDialog(
+                BillPaidDialog(
                     creditCard = card,
                     bankAccounts = bankAccounts,
                     onDismiss = { payingCreditCard = null },
-                    onConfirmPayment = { bankId, amount, note ->
+                    onConfirmBillPaid = { bankId, amount, note ->
                         coroutineScope.launch {
-                            repository.payCreditCardBill(
+                            val success = repository.confirmBillPaid(
+                                creditCardId = card.id,
+                                amountPaid = amount,
                                 sourceBankAccountId = bankId,
-                                creditCardAccountId = card.id,
-                                amount = amount,
-                                notes = note ?: "Credit Card Bill Payment"
+                                notes = note
                             )
                             payingCreditCard = null
-                            snackbarHostState.showSnackbar("Recorded payment of ₹${String.format(java.util.Locale.getDefault(), "%,.2f", amount)} to ${card.name}")
+                            if (success) {
+                                snackbarHostState.showSnackbar("Bill marked as paid! Available credit limit updated.")
+                            } else {
+                                snackbarHostState.showSnackbar("Failed to record bill payment.")
+                            }
                         }
                     }
                 )
             }
 
+            // Dialog: Change Category
             editingCategoryTxn?.let { item ->
                 ChangeCategoryDialog(
                     transactionWithDetails = item,
@@ -394,6 +449,7 @@ fun MainAppShell(
                 )
             }
 
+            // Dialog: Add Manual Transaction
             if (showAddTxnDialog) {
                 AddTransactionDialog(
                     accounts = accounts,
@@ -411,23 +467,6 @@ fun MainAppShell(
                             )
                             showAddTxnDialog = false
                             snackbarHostState.showSnackbar("Transaction recorded")
-                        }
-                    }
-                )
-            }
-
-            if (showSimulateSmsDialog) {
-                SimulateSmsDialog(
-                    onDismiss = { showSimulateSmsDialog = false },
-                    onSimulate = { sender, msg ->
-                        coroutineScope.launch {
-                            val success = repository.simulateIncomingSms(sender, msg)
-                            showSimulateSmsDialog = false
-                            if (success) {
-                                snackbarHostState.showSnackbar("Financial SMS processed!")
-                            } else {
-                                snackbarHostState.showSnackbar("Ignored (Spam / OTP or non-financial)")
-                            }
                         }
                     }
                 )

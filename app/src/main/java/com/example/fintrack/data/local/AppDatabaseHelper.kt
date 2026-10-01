@@ -8,7 +8,9 @@ import android.database.sqlite.SQLiteOpenHelper
 import com.example.fintrack.data.model.Account
 import com.example.fintrack.data.model.AccountAlias
 import com.example.fintrack.data.model.AccountType
+import com.example.fintrack.data.model.AuditLog
 import com.example.fintrack.data.model.BankAccountType
+import com.example.fintrack.data.model.BillStatus
 import com.example.fintrack.data.model.Category
 import com.example.fintrack.data.model.CategorySpend
 import com.example.fintrack.data.model.DashboardSummary
@@ -22,6 +24,10 @@ import com.example.fintrack.data.model.TransactionKind
 import com.example.fintrack.data.model.TransactionWithDetails
 import com.example.fintrack.data.model.TrendPoint
 import com.example.fintrack.data.model.UpcomingCreditCardDue
+import com.example.fintrack.data.model.User
+import com.example.fintrack.data.model.VerificationEvent
+import com.example.fintrack.data.model.VerificationEventType
+import com.example.fintrack.data.model.VerificationStatus
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -41,7 +47,7 @@ class AppDatabaseHelper(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "fintrack_secure.db"
-        const val DATABASE_VERSION = 3
+        const val DATABASE_VERSION = 4
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -53,6 +59,7 @@ class AppDatabaseHelper(context: Context) :
         }
 
         // Tables
+        const val TABLE_USERS = "users"
         const val TABLE_ACCOUNTS = "accounts"
         const val TABLE_CATEGORIES = "categories"
         const val TABLE_TRANSACTIONS = "transactions"
@@ -60,9 +67,21 @@ class AppDatabaseHelper(context: Context) :
         const val TABLE_RECONCILIATION_LOGS = "reconciliation_logs"
         const val TABLE_IMPORTED_SMS = "imported_sms"
         const val TABLE_ACCOUNT_ALIASES = "account_aliases"
+        const val TABLE_VERIFICATION_EVENTS = "verification_events"
+        const val TABLE_AUDIT_LOGS = "audit_logs"
+
+        // Users Columns
+        const val COL_USER_ID = "id"
+        const val COL_USER_NAME = "name"
+        const val COL_USER_EMAIL = "email"
+        const val COL_USER_PHONE = "phone"
+        const val COL_USER_COLOR = "color_hex"
+        const val COL_USER_IS_ACTIVE = "is_active"
+        const val COL_USER_CREATED = "created_at"
 
         // Accounts Columns
         const val COL_ACC_ID = "id"
+        const val COL_ACC_USER_ID = "user_id" 
         const val COL_ACC_NAME = "name"
         const val COL_ACC_BANK = "bank_name"
         const val COL_ACC_TYPE = "account_type"
@@ -75,6 +94,7 @@ class AppDatabaseHelper(context: Context) :
         const val COL_ACC_DUE_DATE = "payment_due_date"
         const val COL_ACC_MIN_DUE = "minimum_due" // Encrypted
         const val COL_ACC_TOTAL_DUE = "total_due" // Encrypted
+        const val COL_ACC_BILL_STATUS = "bill_status" 
         const val COL_ACC_LINKED_ACCOUNTS = "linked_accounts"
         const val COL_ACC_LAST_CONFIRMED_BAL = "last_confirmed_bal" // Encrypted
         const val COL_ACC_LAST_CONFIRMED_AT = "last_confirmed_at"
@@ -93,6 +113,7 @@ class AppDatabaseHelper(context: Context) :
 
         // Transactions Columns
         const val COL_TXN_ID = "id"
+        const val COL_TXN_USER_ID = "user_id" 
         const val COL_TXN_ACC_ID = "account_id"
         const val COL_TXN_SOURCE_ACC_ID = "source_account_id"
         const val COL_TXN_DEST_ACC_ID = "destination_account_id"
@@ -123,6 +144,7 @@ class AppDatabaseHelper(context: Context) :
 
         // Reconciliation Columns
         const val COL_REC_ID = "id"
+        const val COL_REC_USER_ID = "user_id" 
         const val COL_REC_ACC_ID = "account_id"
         const val COL_REC_LEDGER_BAL = "ledger_balance"
         const val COL_REC_CONFIRMED_BAL = "confirmed_balance"
@@ -133,6 +155,7 @@ class AppDatabaseHelper(context: Context) :
 
         // Imported SMS Columns
         const val COL_SMS_ID = "id"
+        const val COL_SMS_USER_ID = "user_id" 
         const val COL_SMS_SENDER = "sender"
         const val COL_SMS_BODY = "body"
         const val COL_SMS_TIMESTAMP = "timestamp"
@@ -144,9 +167,41 @@ class AppDatabaseHelper(context: Context) :
 
         // Account Aliases Columns
         const val COL_ALIAS_ID = "id"
+        const val COL_ALIAS_USER_ID = "user_id" 
         const val COL_ALIAS_ACC_ID = "account_id"
         const val COL_ALIAS_PATTERN = "alias_pattern"
         const val COL_ALIAS_SENDER = "sender_pattern"
+
+        // Verification Events Columns
+        const val COL_VERIF_ID = "id"
+        const val COL_VERIF_USER_ID = "user_id"
+        const val COL_VERIF_STATUS = "status"
+        const val COL_VERIF_EVENT_TYPE = "event_type"
+        const val COL_VERIF_TITLE = "title"
+        const val COL_VERIF_DESCRIPTION = "description"
+        const val COL_VERIF_AMOUNT = "amount"
+        const val COL_VERIF_MERCHANT = "merchant"
+        const val COL_VERIF_LAST4 = "account_last4"
+        const val COL_VERIF_SOURCE_TEXT = "source_text"
+        const val COL_VERIF_EXTRACTED_JSON = "extracted_data_json"
+        const val COL_VERIF_CONFIDENCE = "confidence"
+        const val COL_VERIF_TXN_ID = "transaction_id"
+        const val COL_VERIF_ACC_ID = "account_id"
+        const val COL_VERIF_CREATED = "created_at"
+        const val COL_VERIF_EXPIRES_AT = "expires_at"
+        const val COL_VERIF_RESOLVED_AT = "resolved_at"
+
+        // Audit Logs Columns
+        const val COL_AUDIT_ID = "id"
+        const val COL_AUDIT_USER_ID = "user_id"
+        const val COL_AUDIT_ENTITY_TYPE = "entity_type"
+        const val COL_AUDIT_ENTITY_ID = "entity_id"
+        const val COL_AUDIT_ACTION = "action"
+        const val COL_AUDIT_OLD_STATE = "old_state"
+        const val COL_AUDIT_NEW_STATE = "new_state"
+        const val COL_AUDIT_SOURCE = "source"
+        const val COL_AUDIT_TIMESTAMP = "timestamp"
+        const val COL_AUDIT_DETAILS = "details" 
     }
 
     private val _dbChangeSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -157,11 +212,27 @@ class AppDatabaseHelper(context: Context) :
     }
 
     override fun onCreate(db: SQLiteDatabase) {
+        // Users table
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_USERS (
+                $COL_USER_ID TEXT PRIMARY KEY,
+                $COL_USER_NAME TEXT NOT NULL,
+                $COL_USER_EMAIL TEXT,
+                $COL_USER_PHONE TEXT,
+                $COL_USER_COLOR INTEGER NOT NULL,
+                $COL_USER_IS_ACTIVE INTEGER NOT NULL DEFAULT 1,
+                $COL_USER_CREATED INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+
         // Accounts table
         db.execSQL(
             """
             CREATE TABLE $TABLE_ACCOUNTS (
                 $COL_ACC_ID TEXT PRIMARY KEY,
+                $COL_ACC_USER_ID TEXT NOT NULL DEFAULT 'user_default',
                 $COL_ACC_NAME TEXT NOT NULL,
                 $COL_ACC_BANK TEXT NOT NULL,
                 $COL_ACC_TYPE TEXT NOT NULL DEFAULT 'BANK_ACCOUNT',
@@ -174,6 +245,7 @@ class AppDatabaseHelper(context: Context) :
                 $COL_ACC_DUE_DATE TEXT,
                 $COL_ACC_MIN_DUE TEXT,
                 $COL_ACC_TOTAL_DUE TEXT,
+                $COL_ACC_BILL_STATUS TEXT NOT NULL DEFAULT 'UNKNOWN',
                 $COL_ACC_LINKED_ACCOUNTS TEXT,
                 $COL_ACC_LAST_CONFIRMED_BAL TEXT,
                 $COL_ACC_LAST_CONFIRMED_AT INTEGER,
@@ -204,6 +276,7 @@ class AppDatabaseHelper(context: Context) :
             """
             CREATE TABLE $TABLE_TRANSACTIONS (
                 $COL_TXN_ID TEXT PRIMARY KEY,
+                $COL_TXN_USER_ID TEXT NOT NULL DEFAULT 'user_default',
                 $COL_TXN_ACC_ID TEXT NOT NULL,
                 $COL_TXN_SOURCE_ACC_ID TEXT,
                 $COL_TXN_DEST_ACC_ID TEXT,
@@ -254,6 +327,7 @@ class AppDatabaseHelper(context: Context) :
             """
             CREATE TABLE $TABLE_RECONCILIATION_LOGS (
                 $COL_REC_ID TEXT PRIMARY KEY,
+                $COL_REC_USER_ID TEXT NOT NULL DEFAULT 'user_default',
                 $COL_REC_ACC_ID TEXT NOT NULL,
                 $COL_REC_LEDGER_BAL TEXT NOT NULL,
                 $COL_REC_CONFIRMED_BAL TEXT NOT NULL,
@@ -270,6 +344,7 @@ class AppDatabaseHelper(context: Context) :
             """
             CREATE TABLE $TABLE_IMPORTED_SMS (
                 $COL_SMS_ID TEXT PRIMARY KEY,
+                $COL_SMS_USER_ID TEXT NOT NULL DEFAULT 'user_default',
                 $COL_SMS_SENDER TEXT NOT NULL,
                 $COL_SMS_BODY TEXT NOT NULL,
                 $COL_SMS_TIMESTAMP INTEGER NOT NULL,
@@ -287,6 +362,7 @@ class AppDatabaseHelper(context: Context) :
             """
             CREATE TABLE $TABLE_ACCOUNT_ALIASES (
                 $COL_ALIAS_ID TEXT PRIMARY KEY,
+                $COL_ALIAS_USER_ID TEXT NOT NULL DEFAULT 'user_default',
                 $COL_ALIAS_ACC_ID TEXT NOT NULL,
                 $COL_ALIAS_PATTERN TEXT NOT NULL,
                 $COL_ALIAS_SENDER TEXT
@@ -294,10 +370,54 @@ class AppDatabaseHelper(context: Context) :
             """.trimIndent()
         )
 
-        // Seed default categories
-        seedDefaultCategories(db)
+        // Verification Events Table
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_VERIFICATION_EVENTS (
+                $COL_VERIF_ID TEXT PRIMARY KEY,
+                $COL_VERIF_USER_ID TEXT NOT NULL DEFAULT 'user_default',
+                $COL_VERIF_STATUS TEXT NOT NULL,
+                $COL_VERIF_EVENT_TYPE TEXT NOT NULL,
+                $COL_VERIF_TITLE TEXT NOT NULL,
+                $COL_VERIF_DESCRIPTION TEXT NOT NULL,
+                $COL_VERIF_AMOUNT TEXT,
+                $COL_VERIF_MERCHANT TEXT,
+                $COL_VERIF_LAST4 TEXT,
+                $COL_VERIF_SOURCE_TEXT TEXT,
+                $COL_VERIF_EXTRACTED_JSON TEXT,
+                $COL_VERIF_CONFIDENCE REAL NOT NULL,
+                $COL_VERIF_TXN_ID TEXT,
+                $COL_VERIF_ACC_ID TEXT,
+                $COL_VERIF_CREATED INTEGER NOT NULL,
+                $COL_VERIF_EXPIRES_AT INTEGER,
+                $COL_VERIF_RESOLVED_AT INTEGER
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_verif_user_status ON $TABLE_VERIFICATION_EVENTS ($COL_VERIF_USER_ID, $COL_VERIF_STATUS)")
 
-        // Seed default Primary Account
+        // Audit Logs Table
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_AUDIT_LOGS (
+                $COL_AUDIT_ID TEXT PRIMARY KEY,
+                $COL_AUDIT_USER_ID TEXT NOT NULL DEFAULT 'user_default',
+                $COL_AUDIT_ENTITY_TYPE TEXT NOT NULL,
+                $COL_AUDIT_ENTITY_ID TEXT NOT NULL,
+                $COL_AUDIT_ACTION TEXT NOT NULL,
+                $COL_AUDIT_OLD_STATE TEXT,
+                $COL_AUDIT_NEW_STATE TEXT,
+                $COL_AUDIT_SOURCE TEXT NOT NULL,
+                $COL_AUDIT_TIMESTAMP INTEGER NOT NULL,
+                $COL_AUDIT_DETAILS TEXT
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_audit_user ON $TABLE_AUDIT_LOGS ($COL_AUDIT_USER_ID, $COL_AUDIT_TIMESTAMP DESC)")
+
+        // Seed default categories, user and account
+        seedDefaultCategories(db)
+        seedDefaultUser(db)
         seedDefaultAccount(db)
     }
 
@@ -395,6 +515,79 @@ class AppDatabaseHelper(context: Context) :
                 )
             }
 
+            if (oldVersion < 4) {
+                // 1. Add user_id column to tables
+                addColumnIfNotExists(db, TABLE_ACCOUNTS, COL_ACC_USER_ID, "TEXT NOT NULL DEFAULT 'user_default'")
+                addColumnIfNotExists(db, TABLE_ACCOUNTS, COL_ACC_BILL_STATUS, "TEXT NOT NULL DEFAULT 'UNKNOWN'")
+                addColumnIfNotExists(db, TABLE_TRANSACTIONS, COL_TXN_USER_ID, "TEXT NOT NULL DEFAULT 'user_default'")
+                addColumnIfNotExists(db, TABLE_IMPORTED_SMS, COL_SMS_USER_ID, "TEXT NOT NULL DEFAULT 'user_default'")
+                addColumnIfNotExists(db, TABLE_RECONCILIATION_LOGS, COL_REC_USER_ID, "TEXT NOT NULL DEFAULT 'user_default'")
+                addColumnIfNotExists(db, TABLE_ACCOUNT_ALIASES, COL_ALIAS_USER_ID, "TEXT NOT NULL DEFAULT 'user_default'")
+
+                // 2. Create Users table
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS $TABLE_USERS (
+                        $COL_USER_ID TEXT PRIMARY KEY,
+                        $COL_USER_NAME TEXT NOT NULL,
+                        $COL_USER_EMAIL TEXT,
+                        $COL_USER_PHONE TEXT,
+                        $COL_USER_COLOR INTEGER NOT NULL,
+                        $COL_USER_IS_ACTIVE INTEGER NOT NULL DEFAULT 1,
+                        $COL_USER_CREATED INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+
+                // 3. Create Verification Events Table
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS $TABLE_VERIFICATION_EVENTS (
+                        $COL_VERIF_ID TEXT PRIMARY KEY,
+                        $COL_VERIF_USER_ID TEXT NOT NULL DEFAULT 'user_default',
+                        $COL_VERIF_STATUS TEXT NOT NULL,
+                        $COL_VERIF_EVENT_TYPE TEXT NOT NULL,
+                        $COL_VERIF_TITLE TEXT NOT NULL,
+                        $COL_VERIF_DESCRIPTION TEXT NOT NULL,
+                        $COL_VERIF_AMOUNT TEXT,
+                        $COL_VERIF_MERCHANT TEXT,
+                        $COL_VERIF_LAST4 TEXT,
+                        $COL_VERIF_SOURCE_TEXT TEXT,
+                        $COL_VERIF_EXTRACTED_JSON TEXT,
+                        $COL_VERIF_CONFIDENCE REAL NOT NULL,
+                        $COL_VERIF_TXN_ID TEXT,
+                        $COL_VERIF_ACC_ID TEXT,
+                        $COL_VERIF_CREATED INTEGER NOT NULL,
+                        $COL_VERIF_EXPIRES_AT INTEGER,
+                        $COL_VERIF_RESOLVED_AT INTEGER
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_verif_user_status ON $TABLE_VERIFICATION_EVENTS ($COL_VERIF_USER_ID, $COL_VERIF_STATUS)")
+
+                // 4. Create Audit Logs Table
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS $TABLE_AUDIT_LOGS (
+                        $COL_AUDIT_ID TEXT PRIMARY KEY,
+                        $COL_AUDIT_USER_ID TEXT NOT NULL DEFAULT 'user_default',
+                        $COL_AUDIT_ENTITY_TYPE TEXT NOT NULL,
+                        $COL_AUDIT_ENTITY_ID TEXT NOT NULL,
+                        $COL_AUDIT_ACTION TEXT NOT NULL,
+                        $COL_AUDIT_OLD_STATE TEXT,
+                        $COL_AUDIT_NEW_STATE TEXT,
+                        $COL_AUDIT_SOURCE TEXT NOT NULL,
+                        $COL_AUDIT_TIMESTAMP INTEGER NOT NULL,
+                        $COL_AUDIT_DETAILS TEXT
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_audit_user ON $TABLE_AUDIT_LOGS ($COL_AUDIT_USER_ID, $COL_AUDIT_TIMESTAMP DESC)")
+
+                // 5. Seed default user
+                seedDefaultUser(db)
+            }
+
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -430,6 +623,18 @@ class AppDatabaseHelper(context: Context) :
             }
             db.insertWithOnConflict(TABLE_CATEGORIES, null, values, SQLiteDatabase.CONFLICT_IGNORE)
         }
+    }
+
+    private fun seedDefaultUser(db: SQLiteDatabase) {
+        val values = ContentValues().apply {
+            put(COL_USER_ID, User.DEFAULT_USER_ID)
+            put(COL_USER_NAME, "Primary User")
+            put(COL_USER_EMAIL, "user@fintrack.local")
+            put(COL_USER_COLOR, 0xFF2563EB)
+            put(COL_USER_IS_ACTIVE, 1)
+            put(COL_USER_CREATED, System.currentTimeMillis())
+        }
+        db.insertWithOnConflict(TABLE_USERS, null, values, SQLiteDatabase.CONFLICT_IGNORE)
     }
 
     private fun seedDefaultAccount(db: SQLiteDatabase) {
@@ -471,6 +676,8 @@ class AppDatabaseHelper(context: Context) :
         val db = writableDatabase
         val values = ContentValues().apply {
             put(COL_ACC_ID, account.id)
+            put(COL_ACC_USER_ID, account.userId)
+            put(COL_ACC_BILL_STATUS, account.billStatus.name)
             put(COL_ACC_NAME, account.name)
             put(COL_ACC_BANK, account.bankName)
             put(COL_ACC_TYPE, account.accountType.name)
@@ -666,10 +873,17 @@ class AppDatabaseHelper(context: Context) :
         return rows > 0
     }
 
-    fun getAccounts(): List<Account> {
+    fun getAccounts(userId: String = User.DEFAULT_USER_ID): List<Account> {
         val db = readableDatabase
         val accounts = mutableListOf<Account>()
-        val cursor: Cursor = db.query(TABLE_ACCOUNTS, null, null, null, null, null, "$COL_ACC_IS_PRIMARY DESC, $COL_ACC_CREATED ASC")
+        val cursor: Cursor = db.query(
+            TABLE_ACCOUNTS,
+            null,
+            "$COL_ACC_USER_ID = ?",
+            arrayOf(userId),
+            null, null,
+            "$COL_ACC_IS_PRIMARY DESC, $COL_ACC_CREATED ASC"
+        )
         cursor.use { c ->
             while (c.moveToNext()) {
                 val id = c.getString(c.getColumnIndexOrThrow(COL_ACC_ID))
@@ -706,6 +920,13 @@ class AppDatabaseHelper(context: Context) :
                 val totDueEnc = if (totDueIdx != -1) c.getString(totDueIdx) else null
                 val totDue = totDueEnc?.let { SecurityManager.decryptDouble(it) }
 
+                val billStatusIdx = c.getColumnIndex(COL_ACC_BILL_STATUS)
+                val billStatusStr = if (billStatusIdx != -1) c.getString(billStatusIdx) else null
+                val billStatus = BillStatus.fromString(billStatusStr)
+
+                val userIdx = c.getColumnIndex(COL_ACC_USER_ID)
+                val rowUserId = if (userIdx != -1) c.getString(userIdx) ?: userId else userId
+
                 val linkedIdx = c.getColumnIndex(COL_ACC_LINKED_ACCOUNTS)
                 val linkedStr = if (linkedIdx != -1) c.getString(linkedIdx) ?: "" else ""
                 val linkedIds = if (linkedStr.isBlank()) emptyList() else linkedStr.split(",")
@@ -730,6 +951,7 @@ class AppDatabaseHelper(context: Context) :
                 accounts.add(
                     Account(
                         id = id,
+                        userId = rowUserId,
                         name = name,
                         bankName = bank,
                         accountType = accountType,
@@ -743,6 +965,7 @@ class AppDatabaseHelper(context: Context) :
                         paymentDueDate = dueDate,
                         minimumDue = minDue,
                         totalDue = totDue,
+                        billStatus = billStatus,
                         linkedPaymentAccountIds = linkedIds,
                         lastConfirmedBalance = confBal,
                         lastConfirmedAt = confAt,
@@ -757,12 +980,12 @@ class AppDatabaseHelper(context: Context) :
         return accounts
     }
 
-    fun getAccountById(accountId: String): Account? {
-        return getAccounts().firstOrNull { it.id == accountId }
+    fun getAccountById(accountId: String, userId: String = User.DEFAULT_USER_ID): Account? {
+        return getAccounts(userId).firstOrNull { it.id == accountId }
     }
 
-    fun findAccountByBankAndLast4(bankName: String, last4: String): Account? {
-        val accounts = getAccounts()
+    fun findAccountByBankAndLast4(bankName: String, last4: String, userId: String = User.DEFAULT_USER_ID): Account? {
+        val accounts = getAccounts(userId)
         if (last4.isNotEmpty()) {
             val match = accounts.firstOrNull { it.accountNumberLast4 == last4 }
             if (match != null) return match
@@ -848,6 +1071,7 @@ class AppDatabaseHelper(context: Context) :
         val db = writableDatabase
         val values = ContentValues().apply {
             put(COL_SMS_ID, alert.id)
+            put(COL_SMS_USER_ID, alert.userId)
             put(COL_SMS_SENDER, alert.sender)
             put(COL_SMS_BODY, alert.body)
             put(COL_SMS_TIMESTAMP, alert.timestamp)
@@ -862,10 +1086,18 @@ class AppDatabaseHelper(context: Context) :
         return result != -1L
     }
 
-    fun getImportedSmsAlerts(): List<ImportedSmsAlert> {
+    fun getImportedSmsAlerts(userId: String = User.DEFAULT_USER_ID): List<ImportedSmsAlert> {
         val db = readableDatabase
         val alerts = mutableListOf<ImportedSmsAlert>()
-        val cursor = db.query(TABLE_IMPORTED_SMS, null, null, null, null, null, "$COL_SMS_TIMESTAMP DESC", "200")
+        val cursor = db.query(
+            TABLE_IMPORTED_SMS,
+            null,
+            "$COL_SMS_USER_ID = ?",
+            arrayOf(userId),
+            null, null,
+            "$COL_SMS_TIMESTAMP DESC",
+            "200"
+        )
         cursor.use { c ->
             while (c.moveToNext()) {
                 val id = c.getString(c.getColumnIndexOrThrow(COL_SMS_ID))
@@ -878,8 +1110,9 @@ class AppDatabaseHelper(context: Context) :
                 val accId = c.getString(c.getColumnIndexOrThrow(COL_SMS_ACC_ID))
                 val confidence = c.getDouble(c.getColumnIndexOrThrow(COL_SMS_CONFIDENCE))
                 val reason = c.getString(c.getColumnIndexOrThrow(COL_SMS_REASON))
+                val uId = if (c.getColumnIndex(COL_SMS_USER_ID) != -1) c.getString(c.getColumnIndexOrThrow(COL_SMS_USER_ID)) ?: User.DEFAULT_USER_ID else User.DEFAULT_USER_ID
 
-                alerts.add(ImportedSmsAlert(id, sender, body, timestamp, status, txnId, accId, confidence, reason))
+                alerts.add(ImportedSmsAlert(id, sender, body, timestamp, status, txnId, accId, confidence, reason, uId))
             }
         }
         return alerts
@@ -1046,6 +1279,7 @@ class AppDatabaseHelper(context: Context) :
         val db = writableDatabase
         val values = ContentValues().apply {
             put(COL_TXN_ID, transaction.id)
+            put(COL_TXN_USER_ID, transaction.userId)
             put(COL_TXN_ACC_ID, transaction.accountId)
             put(COL_TXN_SOURCE_ACC_ID, transaction.sourceAccountId ?: transaction.accountId)
             put(COL_TXN_DEST_ACC_ID, transaction.destinationAccountId)
@@ -1264,6 +1498,8 @@ class AppDatabaseHelper(context: Context) :
 
     private fun parseTransactionCursor(c: Cursor): Transaction {
         val id = c.getString(c.getColumnIndexOrThrow(COL_TXN_ID))
+        val userIdx = c.getColumnIndex(COL_TXN_USER_ID)
+        val rowUserId = if (userIdx != -1) c.getString(userIdx) ?: User.DEFAULT_USER_ID else User.DEFAULT_USER_ID
         val accId = c.getString(c.getColumnIndexOrThrow(COL_TXN_ACC_ID))
 
         val srcIdx = c.getColumnIndex(COL_TXN_SOURCE_ACC_ID)
@@ -1319,6 +1555,7 @@ class AppDatabaseHelper(context: Context) :
 
         return Transaction(
             id = id,
+            userId = rowUserId,
             accountId = accId,
             sourceAccountId = sourceAccId,
             destinationAccountId = destAccId,
@@ -1385,8 +1622,8 @@ class AppDatabaseHelper(context: Context) :
     // DASHBOARD & ANALYTICS
     // ==========================================
 
-    fun getDashboardSummary(period: TimePeriod): DashboardSummary {
-        val accounts = getAccounts()
+    fun getDashboardSummary(period: TimePeriod, userId: String = User.DEFAULT_USER_ID): DashboardSummary {
+        val accounts = getAccounts(userId)
         // Bank/Cash Assets
         val totalBankBalance = accounts.filter { it.accountType != AccountType.CREDIT_CARD }.sumOf { it.currentBalance }
         // Credit Card Liabilities (Outstanding)
@@ -1566,4 +1803,510 @@ class AppDatabaseHelper(context: Context) :
         }
         return points
     }
+
+    // ==========================================
+    // BILL PAID & RECONCILIATION INTELLIGENCE
+    // ==========================================
+
+    /**
+     * Confirms that a credit card bill was paid externally by the user.
+     * Decrements the card's current outstanding liability, expands available credit,
+     * updates bill status to PAID, and records an auditable payment transaction.
+     */
+    fun confirmBillPaid(
+        creditCardId: String,
+        amountPaid: Double,
+        paidTimestamp: Long = System.currentTimeMillis(),
+        payingBankAccountId: String? = null,
+        note: String? = null,
+        userId: String = User.DEFAULT_USER_ID
+    ): Boolean {
+        val db = writableDatabase
+        db.beginTransaction()
+        return try {
+            val card = getAccountById(creditCardId, userId) ?: return false
+            if (!card.isCreditCard) return false
+
+            val oldOutstanding = card.currentBalance
+            val oldAvailable = card.availableCredit ?: maxOf(0.0, card.creditLimit - oldOutstanding)
+            val oldBillStatus = card.billStatus.name
+
+            // Recalculate financial state correctly
+            val newOutstanding = maxOf(0.0, oldOutstanding - amountPaid)
+            val newAvailable = if (card.creditLimit > 0) {
+                minOf(card.creditLimit, oldAvailable + amountPaid)
+            } else {
+                oldAvailable + amountPaid
+            }
+            val newTotalDue = maxOf(0.0, (card.totalDue ?: 0.0) - amountPaid)
+
+            // 1. Update the credit card record
+            val cardValues = ContentValues().apply {
+                put(COL_ACC_AVAIL_CREDIT, SecurityManager.encryptDouble(newAvailable))
+                put(COL_ACC_TOTAL_DUE, SecurityManager.encryptDouble(newTotalDue))
+                put(COL_ACC_BILL_STATUS, BillStatus.PAID.name)
+                put(COL_ACC_LAST_CONFIRMED_BAL, SecurityManager.encryptDouble(newAvailable))
+                put(COL_ACC_LAST_CONFIRMED_AT, paidTimestamp)
+            }
+            db.update(TABLE_ACCOUNTS, cardValues, "$COL_ACC_ID = ? AND $COL_ACC_USER_ID = ?", arrayOf(creditCardId, userId))
+
+            // 2. Insert CARD_PAYMENT transaction record
+            val refNo = "MANUAL_PAID_${System.currentTimeMillis()}"
+            val paymentTxn = Transaction(
+                id = UUID.randomUUID().toString(),
+                userId = userId,
+                accountId = creditCardId,
+                sourceAccountId = payingBankAccountId,
+                destinationAccountId = creditCardId,
+                categoryId = "cat_bills",
+                amount = amountPaid,
+                direction = TransactionDirection.CREDIT,
+                kind = TransactionKind.CARD_PAYMENT,
+                timestamp = paidTimestamp,
+                merchant = "${card.bankName} Bill Paid Confirmation",
+                referenceNumber = refNo,
+                balanceAfterTxn = newOutstanding,
+                availableCreditAfterTxn = newAvailable,
+                isManual = true,
+                note = note ?: "Credit card bill marked as paid"
+            )
+            insertTransactionInternal(db, paymentTxn)
+
+            // 3. If a paying bank account was specified, record corresponding debit
+            if (payingBankAccountId != null) {
+                val bankAcc = getAccountById(payingBankAccountId, userId)
+                if (bankAcc != null) {
+                    val bankTxn = Transaction(
+                        id = UUID.randomUUID().toString(),
+                        userId = userId,
+                        accountId = payingBankAccountId,
+                        sourceAccountId = payingBankAccountId,
+                        destinationAccountId = creditCardId,
+                        categoryId = "cat_bills",
+                        amount = amountPaid,
+                        direction = TransactionDirection.DEBIT,
+                        kind = TransactionKind.CARD_PAYMENT,
+                        timestamp = paidTimestamp,
+                        merchant = "Payment to ${card.name}",
+                        referenceNumber = refNo,
+                        linkedTransactionId = paymentTxn.id,
+                        isManual = true,
+                        note = note ?: "Payment towards ${card.name} bill"
+                    )
+                    insertTransactionInternal(db, bankTxn)
+                }
+            }
+
+            // 4. Record Audit Log
+            val audit = AuditLog(
+                id = UUID.randomUUID().toString(),
+                userId = userId,
+                entityType = "CREDIT_CARD",
+                entityId = creditCardId,
+                action = "BILL_PAID",
+                oldState = oldBillStatus,
+                newState = BillStatus.PAID.name,
+                source = "User confirmation",
+                timestamp = paidTimestamp,
+                details = "Recorded bill paid for ₹${String.format(Locale.US, "%.2f", amountPaid)}. Outstanding: ₹${String.format(Locale.US, "%.2f", oldOutstanding)} -> ₹${String.format(Locale.US, "%.2f", newOutstanding)}"
+            )
+            insertAuditLogInternal(db, audit)
+
+            db.setTransactionSuccessful()
+            notifyDataChanged()
+            true
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    /**
+     * Checks if a matching manual "Bill Paid" transaction was recorded for this card
+     * within the specified time window (default: 72 hours). Used to prevent duplicate
+     * transactions when a bank confirmation SMS arrives later.
+     */
+    fun findMatchingRecentManualPayment(
+        cardId: String,
+        amount: Double,
+        windowMs: Long = 72 * 3600 * 1000L,
+        userId: String = User.DEFAULT_USER_ID
+    ): Transaction? {
+        val db = readableDatabase
+        val since = System.currentTimeMillis() - windowMs
+        val cursor = db.query(
+            TABLE_TRANSACTIONS,
+            null,
+            "($COL_TXN_ACC_ID = ? OR $COL_TXN_DEST_ACC_ID = ?) AND $COL_TXN_KIND = ? AND $COL_TXN_IS_MANUAL = 1 AND $COL_TXN_TIMESTAMP >= ? AND $COL_TXN_USER_ID = ?",
+            arrayOf(cardId, cardId, TransactionKind.CARD_PAYMENT.name, since.toString(), userId),
+            null, null,
+            "$COL_TXN_TIMESTAMP DESC"
+        )
+        cursor.use { c ->
+            while (c.moveToNext()) {
+                val txn = parseTransactionCursor(c)
+                if (Math.abs(txn.amount - amount) < 0.05) {
+                    return txn
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * Reconciles a manual bill payment with a later-arriving bank SMS confirmation.
+     */
+    fun reconcilePaymentWithSms(
+        manualTxnId: String,
+        smsRefNo: String?,
+        rawSms: String?,
+        newAvailCredit: Double?,
+        userId: String = User.DEFAULT_USER_ID
+    ): Boolean {
+        val db = writableDatabase
+        db.beginTransaction()
+        return try {
+            val values = ContentValues().apply {
+                if (!smsRefNo.isNullOrBlank()) put(COL_TXN_REF_NO, smsRefNo)
+                if (!rawSms.isNullOrBlank()) put(COL_TXN_RAW_SMS, SecurityManager.encrypt(rawSms))
+                if (newAvailCredit != null) {
+                    put(COL_TXN_AVAIL_CREDIT_AFTER, SecurityManager.encryptDouble(newAvailCredit))
+                }
+            }
+            val rows = db.update(TABLE_TRANSACTIONS, values, "$COL_TXN_ID = ? AND $COL_TXN_USER_ID = ?", arrayOf(manualTxnId, userId))
+
+            val audit = AuditLog(
+                id = UUID.randomUUID().toString(),
+                userId = userId,
+                entityType = "TRANSACTION",
+                entityId = manualTxnId,
+                action = "PAYMENT_RECONCILED",
+                source = "Detected bank message",
+                details = "Reconciled manual 'Bill Paid' entry with bank SMS confirmation (Ref: ${smsRefNo ?: "N/A"})"
+            )
+            insertAuditLogInternal(db, audit)
+
+            db.setTransactionSuccessful()
+            notifyDataChanged()
+            rows > 0
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    private fun insertTransactionInternal(db: SQLiteDatabase, transaction: Transaction) {
+        val values = ContentValues().apply {
+            put(COL_TXN_ID, transaction.id)
+            put(COL_TXN_USER_ID, transaction.userId)
+            put(COL_TXN_ACC_ID, transaction.accountId)
+            put(COL_TXN_SOURCE_ACC_ID, transaction.sourceAccountId ?: transaction.accountId)
+            put(COL_TXN_DEST_ACC_ID, transaction.destinationAccountId)
+            put(COL_TXN_CAT_ID, transaction.categoryId)
+            put(COL_TXN_AMOUNT, SecurityManager.encryptDouble(transaction.amount))
+            put(COL_TXN_TYPE, transaction.direction.name)
+            put(COL_TXN_KIND, transaction.kind.name)
+            put(COL_TXN_TIMESTAMP, transaction.timestamp)
+            put(COL_TXN_MERCHANT, SecurityManager.encrypt(transaction.merchant))
+            put(COL_TXN_RAW_SMS, SecurityManager.encrypt(transaction.rawSmsBody))
+            put(COL_TXN_SMS_SENDER, transaction.smsSender)
+            put(COL_TXN_REF_NO, transaction.referenceNumber)
+            put(COL_TXN_BAL_AFTER, transaction.balanceAfterTxn?.let { SecurityManager.encryptDouble(it) })
+            put(COL_TXN_AVAIL_CREDIT_AFTER, transaction.availableCreditAfterTxn?.let { SecurityManager.encryptDouble(it) })
+            put(COL_TXN_IS_MANUAL, if (transaction.isManual) 1 else 0)
+            put(COL_TXN_NOTE, SecurityManager.encrypt(transaction.note))
+            put(COL_TXN_NEEDS_REVIEW, if (transaction.needsReview) 1 else 0)
+            put(COL_TXN_REVIEW_REASON, transaction.reviewReason)
+            put(COL_TXN_FINGERPRINT, transaction.fingerprint)
+            put(COL_TXN_LINKED_TXN_ID, transaction.linkedTransactionId)
+            put(COL_TXN_CREATED, transaction.createdAt)
+        }
+        db.insert(TABLE_TRANSACTIONS, null, values)
+    }
+
+    // ==========================================
+    // VERIFICATION SYSTEM
+    // ==========================================
+
+    fun insertVerificationEvent(event: VerificationEvent): Boolean {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put(COL_VERIF_ID, event.id)
+            put(COL_VERIF_USER_ID, event.userId)
+            put(COL_VERIF_STATUS, event.status.name)
+            put(COL_VERIF_EVENT_TYPE, event.eventType.name)
+            put(COL_VERIF_TITLE, event.title)
+            put(COL_VERIF_DESCRIPTION, event.description)
+            put(COL_VERIF_AMOUNT, event.amount?.let { SecurityManager.encryptDouble(it) })
+            put(COL_VERIF_MERCHANT, SecurityManager.encrypt(event.merchant))
+            put(COL_VERIF_LAST4, event.accountLast4)
+            put(COL_VERIF_SOURCE_TEXT, SecurityManager.encrypt(event.sourceText))
+            put(COL_VERIF_EXTRACTED_JSON, SecurityManager.encrypt(event.extractedJson))
+            put(COL_VERIF_CONFIDENCE, event.confidence)
+            put(COL_VERIF_TXN_ID, event.transactionId)
+            put(COL_VERIF_ACC_ID, event.accountId)
+            put(COL_VERIF_CREATED, event.createdAt)
+            put(COL_VERIF_EXPIRES_AT, event.expiresAt)
+            put(COL_VERIF_RESOLVED_AT, event.resolvedAt)
+        }
+        val res = db.insertWithOnConflict(TABLE_VERIFICATION_EVENTS, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        notifyDataChanged()
+        return res != -1L
+    }
+
+    fun getVerificationEvents(
+        userId: String = User.DEFAULT_USER_ID,
+        status: VerificationStatus? = null
+    ): List<VerificationEvent> {
+        val db = readableDatabase
+        val list = mutableListOf<VerificationEvent>()
+        val selection = if (status != null) {
+            "$COL_VERIF_USER_ID = ? AND $COL_VERIF_STATUS = ?"
+        } else {
+            "$COL_VERIF_USER_ID = ?"
+        }
+        val selectionArgs = if (status != null) {
+            arrayOf(userId, status.name)
+        } else {
+            arrayOf(userId)
+        }
+        val cursor = db.query(
+            TABLE_VERIFICATION_EVENTS,
+            null,
+            selection,
+            selectionArgs,
+            null, null,
+            "$COL_VERIF_CREATED DESC"
+        )
+        cursor.use { c ->
+            while (c.moveToNext()) {
+                val id = c.getString(c.getColumnIndexOrThrow(COL_VERIF_ID))
+                val rowUserId = c.getString(c.getColumnIndexOrThrow(COL_VERIF_USER_ID))
+                val statusStr = c.getString(c.getColumnIndexOrThrow(COL_VERIF_STATUS))
+                val eventStatus = try { VerificationStatus.valueOf(statusStr) } catch (_: Exception) { VerificationStatus.PENDING }
+                val typeStr = c.getString(c.getColumnIndexOrThrow(COL_VERIF_EVENT_TYPE))
+                val eventType = try { VerificationEventType.valueOf(typeStr) } catch (_: Exception) { VerificationEventType.TRANSACTION_CONFIRMATION }
+                val title = c.getString(c.getColumnIndexOrThrow(COL_VERIF_TITLE))
+                val description = c.getString(c.getColumnIndexOrThrow(COL_VERIF_DESCRIPTION))
+
+                val encAmount = c.getString(c.getColumnIndexOrThrow(COL_VERIF_AMOUNT))
+                val amount = encAmount?.let { SecurityManager.decryptDouble(it) }
+
+                val encMerchant = c.getString(c.getColumnIndexOrThrow(COL_VERIF_MERCHANT))
+                val merchant = SecurityManager.decrypt(encMerchant)
+
+                val last4 = c.getString(c.getColumnIndexOrThrow(COL_VERIF_LAST4))
+                val encSource = c.getString(c.getColumnIndexOrThrow(COL_VERIF_SOURCE_TEXT))
+                val sourceText = SecurityManager.decrypt(encSource)
+
+                val encExtracted = c.getString(c.getColumnIndexOrThrow(COL_VERIF_EXTRACTED_JSON))
+                val extractedJson = SecurityManager.decrypt(encExtracted)
+
+                val confidence = c.getDouble(c.getColumnIndexOrThrow(COL_VERIF_CONFIDENCE))
+                val txnId = c.getString(c.getColumnIndexOrThrow(COL_VERIF_TXN_ID))
+                val accId = c.getString(c.getColumnIndexOrThrow(COL_VERIF_ACC_ID))
+                val created = c.getLong(c.getColumnIndexOrThrow(COL_VERIF_CREATED))
+                val expiresAt = if (!c.isNull(c.getColumnIndexOrThrow(COL_VERIF_EXPIRES_AT))) c.getLong(c.getColumnIndexOrThrow(COL_VERIF_EXPIRES_AT)) else null
+                val resolvedAt = if (!c.isNull(c.getColumnIndexOrThrow(COL_VERIF_RESOLVED_AT))) c.getLong(c.getColumnIndexOrThrow(COL_VERIF_RESOLVED_AT)) else null
+
+                list.add(
+                    VerificationEvent(
+                        id = id,
+                        userId = rowUserId,
+                        status = eventStatus,
+                        eventType = eventType,
+                        title = title,
+                        description = description,
+                        amount = amount,
+                        merchant = merchant,
+                        accountLast4 = last4,
+                        sourceText = sourceText,
+                        extractedJson = extractedJson,
+                        confidence = confidence,
+                        transactionId = txnId,
+                        accountId = accId,
+                        createdAt = created,
+                        expiresAt = expiresAt,
+                        resolvedAt = resolvedAt
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    fun resolveVerificationEvent(
+        eventId: String,
+        newStatus: VerificationStatus,
+        userId: String = User.DEFAULT_USER_ID
+    ): Boolean {
+        val db = writableDatabase
+        db.beginTransaction()
+        return try {
+            val event = getVerificationEvents(userId).firstOrNull { it.id == eventId } ?: return false
+            val now = System.currentTimeMillis()
+
+            val values = ContentValues().apply {
+                put(COL_VERIF_STATUS, newStatus.name)
+                put(COL_VERIF_RESOLVED_AT, now)
+            }
+            val rows = db.update(TABLE_VERIFICATION_EVENTS, values, "$COL_VERIF_ID = ? AND $COL_VERIF_USER_ID = ?", arrayOf(eventId, userId))
+
+            // Action based on confirmed vs rejected
+            when (newStatus) {
+                VerificationStatus.CONFIRMED -> {
+                    // If linked to a transaction with needs_review, clear review flag
+                    event.transactionId?.let { txnId ->
+                        val txnValues = ContentValues().apply {
+                            put(COL_TXN_NEEDS_REVIEW, 0)
+                            putNull(COL_TXN_REVIEW_REASON)
+                        }
+                        db.update(TABLE_TRANSACTIONS, txnValues, "$COL_TXN_ID = ?", arrayOf(txnId))
+                    }
+                    val audit = AuditLog(
+                        id = UUID.randomUUID().toString(),
+                        userId = userId,
+                        entityType = "VERIFICATION_EVENT",
+                        entityId = eventId,
+                        action = "VERIFIED",
+                        oldState = event.status.name,
+                        newState = newStatus.name,
+                        source = "User confirmation",
+                        details = "User confirmed ${event.title}"
+                    )
+                    insertAuditLogInternal(db, audit)
+                }
+                VerificationStatus.REJECTED -> {
+                    // If rejected, delete or mark transaction as rejected
+                    event.transactionId?.let { txnId ->
+                        db.delete(TABLE_TRANSACTIONS, "$COL_TXN_ID = ?", arrayOf(txnId))
+                    }
+                    val audit = AuditLog(
+                        id = UUID.randomUUID().toString(),
+                        userId = userId,
+                        entityType = "VERIFICATION_EVENT",
+                        entityId = eventId,
+                        action = "REJECTED",
+                        oldState = event.status.name,
+                        newState = newStatus.name,
+                        source = "User confirmation",
+                        details = "User rejected ${event.title}"
+                    )
+                    insertAuditLogInternal(db, audit)
+                }
+                else -> {
+                    // Ignored or Expired
+                }
+            }
+
+            db.setTransactionSuccessful()
+            notifyDataChanged()
+            rows > 0
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    // ==========================================
+    // AUDIT LOGS
+    // ==========================================
+
+    fun insertAuditLog(log: AuditLog): Boolean {
+        val db = writableDatabase
+        insertAuditLogInternal(db, log)
+        notifyDataChanged()
+        return true
+    }
+
+    private fun insertAuditLogInternal(db: SQLiteDatabase, log: AuditLog) {
+        val values = ContentValues().apply {
+            put(COL_AUDIT_ID, log.id)
+            put(COL_AUDIT_USER_ID, log.userId)
+            put(COL_AUDIT_ENTITY_TYPE, log.entityType)
+            put(COL_AUDIT_ENTITY_ID, log.entityId)
+            put(COL_AUDIT_ACTION, log.action)
+            put(COL_AUDIT_OLD_STATE, log.oldState)
+            put(COL_AUDIT_NEW_STATE, log.newState)
+            put(COL_AUDIT_SOURCE, log.source)
+            put(COL_AUDIT_TIMESTAMP, log.timestamp)
+            put(COL_AUDIT_DETAILS, log.details)
+        }
+        db.insert(TABLE_AUDIT_LOGS, null, values)
+    }
+
+    fun getAuditLogs(userId: String = User.DEFAULT_USER_ID, limit: Int = 100): List<AuditLog> {
+        val db = readableDatabase
+        val list = mutableListOf<AuditLog>()
+        val cursor = db.query(
+            TABLE_AUDIT_LOGS,
+            null,
+            "$COL_AUDIT_USER_ID = ?",
+            arrayOf(userId),
+            null, null,
+            "$COL_AUDIT_TIMESTAMP DESC",
+            limit.toString()
+        )
+        cursor.use { c ->
+            while (c.moveToNext()) {
+                val id = c.getString(c.getColumnIndexOrThrow(COL_AUDIT_ID))
+                val rowUserId = c.getString(c.getColumnIndexOrThrow(COL_AUDIT_USER_ID))
+                val entityType = c.getString(c.getColumnIndexOrThrow(COL_AUDIT_ENTITY_TYPE))
+                val entityId = c.getString(c.getColumnIndexOrThrow(COL_AUDIT_ENTITY_ID))
+                val action = c.getString(c.getColumnIndexOrThrow(COL_AUDIT_ACTION))
+                val oldState = c.getString(c.getColumnIndexOrThrow(COL_AUDIT_OLD_STATE))
+                val newState = c.getString(c.getColumnIndexOrThrow(COL_AUDIT_NEW_STATE))
+                val source = c.getString(c.getColumnIndexOrThrow(COL_AUDIT_SOURCE))
+                val timestamp = c.getLong(c.getColumnIndexOrThrow(COL_AUDIT_TIMESTAMP))
+                val details = c.getString(c.getColumnIndexOrThrow(COL_AUDIT_DETAILS))
+
+                list.add(AuditLog(id, rowUserId, entityType, entityId, action, oldState, newState, source, timestamp, details))
+            }
+        }
+        return list
+    }
+
+    // ==========================================
+    // MULTI-USER MANAGEMENT
+    // ==========================================
+
+    fun getUsers(): List<User> {
+        val db = readableDatabase
+        val list = mutableListOf<User>()
+        val cursor = db.query(TABLE_USERS, null, null, null, null, null, "$COL_USER_CREATED ASC")
+        cursor.use { c ->
+            while (c.moveToNext()) {
+                val id = c.getString(c.getColumnIndexOrThrow(COL_USER_ID))
+                val name = c.getString(c.getColumnIndexOrThrow(COL_USER_NAME))
+                val email = c.getString(c.getColumnIndexOrThrow(COL_USER_EMAIL))
+                val phone = c.getString(c.getColumnIndexOrThrow(COL_USER_PHONE))
+                val color = c.getLong(c.getColumnIndexOrThrow(COL_USER_COLOR))
+                val isActive = c.getInt(c.getColumnIndexOrThrow(COL_USER_IS_ACTIVE)) == 1
+                val created = c.getLong(c.getColumnIndexOrThrow(COL_USER_CREATED))
+                list.add(User(id, name, email, phone, color, isActive, created))
+            }
+        }
+        if (list.isEmpty()) {
+            list.add(User.DEFAULT_USER)
+        }
+        return list
+    }
+
+    fun insertUser(user: User): Boolean {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put(COL_USER_ID, user.id)
+            put(COL_USER_NAME, user.name)
+            put(COL_USER_EMAIL, user.email)
+            put(COL_USER_PHONE, user.phoneNumber)
+            put(COL_USER_COLOR, user.colorHex)
+            put(COL_USER_IS_ACTIVE, if (user.isActive) 1 else 0)
+            put(COL_USER_CREATED, user.createdAt)
+        }
+        val res = db.insertWithOnConflict(TABLE_USERS, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        notifyDataChanged()
+        return res != -1L
+    }
+
+    fun getUserById(userId: String): User? {
+        return getUsers().firstOrNull { it.id == userId }
+    }
+
 }

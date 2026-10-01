@@ -63,4 +63,84 @@ class CreditCardPaymentEngineTest {
         assertEquals("hdfc_bank_1", match.sourceBankAccount?.id)
         assertEquals(10000.0, match.transaction.amount, 0.001)
     }
+
+    @Test
+    fun testAmbiguousSourceBankTriggersNeedsConfirmation() {
+        val unlinkedCard = iciciCard.copy(linkedPaymentAccountIds = emptyList())
+        val sbiBank = Account(
+            id = "sbi_bank_2",
+            name = "SBI Savings",
+            bankName = "SBI",
+            accountType = AccountType.BANK_ACCOUNT,
+            accountNumberLast4 = "4321",
+            currentBalance = 30000.0
+        )
+        val raw = "Thank you for payment of Rs 5,000 towards ICICI card ending 9900"
+        val parsed = ParsedTransaction(
+            amount = 5000.0,
+            direction = TransactionDirection.CREDIT,
+            kind = TransactionKind.CARD_PAYMENT,
+            instrumentType = FinancialInstrumentType.CREDIT_CARD,
+            bankName = "ICICI Bank",
+            accountNumberLast4 = "9900",
+            merchant = "Credit Card Bill Payment",
+            rawSender = "VM-ICICIB",
+            rawBody = raw
+        )
+
+        val match = engine.processPaymentSms(
+            parsed = parsed,
+            creditCard = unlinkedCard,
+            rawSmsBody = raw,
+            allAccounts = listOf(hdfcBank, sbiBank, unlinkedCard)
+        )
+
+        assertNotNull(match)
+        assertTrue("Ambiguous source bank must require confirmation", match.needsSourceConfirmation)
+        assertTrue("Transaction must be flagged as needsReview", match.transaction.needsReview)
+        assertEquals(null, match.sourceBankAccount)
+    }
+
+    @Test
+    fun testSourceBankExtractedFromSmsBody() {
+        val unlinkedCard = iciciCard.copy(linkedPaymentAccountIds = emptyList())
+        val raw = "Payment of Rs 8,000 received for card 9900 from HDFC A/C ending 1234"
+        val parsed = ParsedTransaction(
+            amount = 8000.0,
+            direction = TransactionDirection.CREDIT,
+            kind = TransactionKind.CARD_PAYMENT,
+            instrumentType = FinancialInstrumentType.CREDIT_CARD,
+            bankName = "ICICI Bank",
+            accountNumberLast4 = "9900",
+            merchant = "Credit Card Bill Payment",
+            rawSender = "VM-ICICIB",
+            rawBody = raw
+        )
+
+        val match = engine.processPaymentSms(
+            parsed = parsed,
+            creditCard = unlinkedCard,
+            rawSmsBody = raw,
+            allAccounts = listOf(hdfcBank, unlinkedCard)
+        )
+
+        assertNotNull(match)
+        assertEquals(false, match.needsSourceConfirmation)
+        assertEquals("hdfc_bank_1", match.sourceBankAccount?.id)
+    }
+
+    @Test
+    fun testCreditLimitRecalculationOnBillPaid() {
+        val totalCreditLimit = 100000.0
+        val startingLiability = 35000.0
+        val startingAvailable = 65000.0
+        val paymentAmount = 20000.0
+
+        val newOutstanding = maxOf(0.0, startingLiability - paymentAmount)
+        val newAvailable = minOf(totalCreditLimit, startingAvailable + paymentAmount)
+
+        assertEquals(15000.0, newOutstanding, 0.001)
+        assertEquals(85000.0, newAvailable, 0.001)
+        assertEquals(totalCreditLimit, newOutstanding + newAvailable, 0.001)
+    }
 }

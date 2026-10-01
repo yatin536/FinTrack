@@ -59,7 +59,7 @@ fun AccountsScreen(
     accounts: List<Account>,
     onAdjustBalanceClick: (Account) -> Unit,
     onCardClick: (Account) -> Unit = {},
-    onPayCardClick: (Account) -> Unit = {},
+    onMarkBillPaidClick: (Account) -> Unit = {},
     onAddAccount: (name: String, bankName: String, type: AccountType, subType: BankAccountType, last4: String, currentBalance: Double, creditLimit: Double, stmtDate: String?, dueDate: String?) -> Unit,
     onEditAccount: (Account, name: String, bankName: String, type: AccountType, subType: BankAccountType, last4: String, currentBalance: Double, creditLimit: Double, stmtDate: String?, dueDate: String?) -> Unit,
     onDeleteAccount: (Account) -> Unit,
@@ -168,7 +168,7 @@ fun AccountsScreen(
                     CreditCardItem(
                         card = card,
                         onClick = { onCardClick(card) },
-                        onPayClick = { onPayCardClick(card) },
+                        onPayClick = { onMarkBillPaidClick(card) },
                         onAdjustBalance = { onAdjustBalanceClick(card) },
                         onEditClick = { accountToEdit = card },
                         onDeleteClick = { accountToDelete = card }
@@ -476,9 +476,9 @@ fun CreditCardItem(
                         shape = RoundedCornerShape(10.dp),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                         modifier = Modifier.height(30.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
                     ) {
-                        Text("Pay Bill", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Bill Paid", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                 }
             }

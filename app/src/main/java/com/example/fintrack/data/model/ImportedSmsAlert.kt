@@ -18,5 +18,6 @@ data class ImportedSmsAlert(
     val transactionId: String? = null,
     val accountId: String? = null,
     val confidence: Double = 1.0,
-    val reason: String? = null
+    val reason: String? = null,
+    val userId: String = User.DEFAULT_USER_ID
 )

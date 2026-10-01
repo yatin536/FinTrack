@@ -33,8 +33,29 @@ enum class BankAccountType {
     CURRENT
 }
 
+enum class BillStatus {
+    UPCOMING,
+    GENERATED,
+    DUE_SOON,
+    PAID,
+    OVERDUE,
+    UNKNOWN;
+
+    companion object {
+        fun fromString(statusStr: String?): BillStatus {
+            if (statusStr == null) return UNKNOWN
+            return try {
+                valueOf(statusStr.uppercase().trim())
+            } catch (_: Exception) {
+                UNKNOWN
+            }
+        }
+    }
+}
+
 data class Account(
     val id: String = UUID.randomUUID().toString(),
+    val userId: String = User.DEFAULT_USER_ID,
     val name: String,
     val bankName: String, // Bank or Card Issuer (e.g. HDFC, ICICI, SBI)
     val accountType: AccountType = AccountType.BANK_ACCOUNT,
@@ -48,6 +69,7 @@ data class Account(
     val paymentDueDate: String? = null, // Payment due date if known
     val minimumDue: Double? = null, // Minimum amount due
     val totalDue: Double? = null, // Total amount due
+    val billStatus: BillStatus = BillStatus.UNKNOWN, // Bill payment status (PAID, DUE_SOON, etc.)
     val linkedPaymentAccountIds: List<String> = emptyList(), // Bank account IDs configured to pay this CC
     val lastConfirmedBalance: Double? = null, // Official balance confirmed from SMS
     val lastConfirmedAt: Long? = null, // Timestamp when official balance was confirmed
@@ -59,7 +81,7 @@ data class Account(
     val isCreditCard: Boolean
         get() = accountType == AccountType.CREDIT_CARD
 
-    // Outstanding for credit cards
+    // Outstanding debt for credit cards
     val outstandingBalance: Double
         get() = if (isCreditCard) currentBalance else 0.0
 
@@ -70,6 +92,13 @@ data class Account(
         } else {
             0.0
         }
+
+    // Limit used
+    val limitUsed: Double
+        get() = if (isCreditCard) currentBalance else 0.0
+
+    val isBillPaid: Boolean
+        get() = billStatus == BillStatus.PAID || (totalDue != null && totalDue <= 0.0)
 
     val displayName: String
         get() = if (accountNumberLast4.isNotEmpty()) {

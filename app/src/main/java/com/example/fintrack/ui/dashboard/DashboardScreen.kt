@@ -28,9 +28,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -62,10 +62,11 @@ fun DashboardScreen(
     selectedPeriod: TimePeriod,
     onPeriodSelected: (TimePeriod) -> Unit,
     onAdjustBalanceClick: (Account) -> Unit,
-    onPayCreditCardClick: (Account) -> Unit = {},
+    onMarkBillPaidClick: (Account) -> Unit = {},
     onTransactionClick: (TransactionWithDetails) -> Unit,
-    onSimulateSmsClick: () -> Unit,
     onAddManualClick: () -> Unit,
+    pendingVerificationCount: Int = 0,
+    onNavigateToVerification: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val primaryAccount = summary.accounts.firstOrNull { it.isPrimary } ?: summary.accounts.firstOrNull()
@@ -108,12 +109,53 @@ fun DashboardScreen(
                         )
                     }
                 }
+            }
+        }
 
-                OutlinedButton(
-                    onClick = onSimulateSmsClick,
-                    shape = RoundedCornerShape(12.dp)
+        // Verification Required Prompt Banner (if any pending alerts)
+        if (pendingVerificationCount > 0) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onNavigateToVerification() }
                 ) {
-                    Text("Test SMS", fontSize = 12.sp)
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = AppIcons.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Column {
+                                Text(
+                                    text = "$pendingVerificationCount Item(s) Require Verification",
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    fontSize = 14.sp
+                                )
+                                Text(
+                                    text = "Tap to review ambiguous alerts & unlinked card payments",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                        Icon(
+                            imageVector = AppIcons.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
                 }
             }
         }
@@ -136,16 +178,15 @@ fun DashboardScreen(
             item {
                 UpcomingDuesCard(
                     dues = summary.upcomingCreditCardDues,
-                    onPayCard = onPayCreditCardClick
+                    onMarkBillPaid = onMarkBillPaidClick
                 )
             }
         }
 
         // Time Period Switcher (Daily / Monthly / Yearly)
         item {
-            TabRow(
+            PrimaryTabRow(
                 selectedTabIndex = selectedPeriod.ordinal,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                 modifier = Modifier.clip(RoundedCornerShape(12.dp))
             ) {
                 TimePeriod.values().forEach { period ->
@@ -404,7 +445,7 @@ fun BalanceCard(
 @Composable
 fun UpcomingDuesCard(
     dues: List<UpcomingCreditCardDue>,
-    onPayCard: (Account) -> Unit
+    onMarkBillPaid: (Account) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -468,15 +509,15 @@ fun UpcomingDuesCard(
                         )
                         Spacer(Modifier.height(4.dp))
                         Button(
-                            onClick = { onPayCard(due.account) },
+                            onClick = { onMarkBillPaid(due.account) },
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                             modifier = Modifier.height(28.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error
+                                containerColor = Color(0xFF059669)
                             )
                         ) {
-                            Text("Pay Bill", fontSize = 11.sp, color = MaterialTheme.colorScheme.onError)
+                            Text("Bill Paid", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                     }
                 }

@@ -38,6 +38,7 @@ enum class TransactionKind {
 
 data class Transaction(
     val id: String = UUID.randomUUID().toString(),
+    val userId: String = User.DEFAULT_USER_ID,
     val accountId: String, // Primary financial instrument
     val sourceAccountId: String? = null, // In transfers/payments: source account
     val destinationAccountId: String? = null, // In transfers/payments: destination account

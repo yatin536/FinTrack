@@ -2,8 +2,10 @@ package com.example.fintrack.data.repository
 
 import android.content.Context
 import com.example.fintrack.data.local.AppDatabaseHelper
+import com.example.fintrack.data.local.SessionManager
 import com.example.fintrack.data.model.Account
 import com.example.fintrack.data.model.AccountType
+import com.example.fintrack.data.model.AuditLog
 import com.example.fintrack.data.model.BankAccountType
 import com.example.fintrack.data.model.Category
 import com.example.fintrack.data.model.DashboardSummary
@@ -15,9 +17,15 @@ import com.example.fintrack.data.model.Transaction
 import com.example.fintrack.data.model.TransactionDirection
 import com.example.fintrack.data.model.TransactionKind
 import com.example.fintrack.data.model.TransactionWithDetails
+import com.example.fintrack.data.model.User
+import com.example.fintrack.data.model.VerificationEvent
+import com.example.fintrack.data.model.VerificationStatus
 import com.example.fintrack.engine.AccountIdentificationEngine
 import com.example.fintrack.engine.BalanceReconciliationEngine
 import com.example.fintrack.engine.CreditCardPaymentEngine
+import com.example.fintrack.engine.FinancialInsight
+import com.example.fintrack.engine.FinancialIntelligenceEngine
+import com.example.fintrack.engine.IntelligenceAnswer
 import com.example.fintrack.engine.ReconciliationResult
 import com.example.fintrack.engine.SmsFingerprintEngine
 import com.example.fintrack.engine.TransferMatchingEngine
@@ -33,30 +41,33 @@ import java.util.UUID
 
 class TransactionRepository(context: Context) {
     private val dbHelper = AppDatabaseHelper.getInstance(context)
+    val sessionManager = SessionManager(context)
+    val intelligenceEngine = FinancialIntelligenceEngine(dbHelper)
+
     private val categorizer = ExpenseCategorizer(dbHelper)
     private val accountEngine = AccountIdentificationEngine(dbHelper)
     private val reconciliationEngine = BalanceReconciliationEngine(dbHelper)
     private val ccPaymentEngine = CreditCardPaymentEngine(dbHelper)
     private val transferEngine = TransferMatchingEngine(dbHelper)
 
-    fun getDashboardSummary(period: TimePeriod): Flow<DashboardSummary> = flow {
-        emit(dbHelper.getDashboardSummary(period))
+    fun getDashboardSummary(period: TimePeriod, userId: String = sessionManager.getActiveUserId()): Flow<DashboardSummary> = flow {
+        emit(dbHelper.getDashboardSummary(period, userId))
         dbHelper.dbChangeSignal.collect {
-            emit(dbHelper.getDashboardSummary(period))
+            emit(dbHelper.getDashboardSummary(period, userId))
         }
     }.flowOn(Dispatchers.IO)
 
-    fun getTransactions(): Flow<List<TransactionWithDetails>> = flow {
-        emit(dbHelper.getTransactionsWithDetails())
+    fun getTransactions(userId: String = sessionManager.getActiveUserId()): Flow<List<TransactionWithDetails>> = flow {
+        emit(dbHelper.getTransactionsWithDetails().filter { it.transaction.userId == userId })
         dbHelper.dbChangeSignal.collect {
-            emit(dbHelper.getTransactionsWithDetails())
+            emit(dbHelper.getTransactionsWithDetails().filter { it.transaction.userId == userId })
         }
     }.flowOn(Dispatchers.IO)
 
-    fun getAccounts(): Flow<List<Account>> = flow {
-        emit(dbHelper.getAccounts())
+    fun getAccounts(userId: String = sessionManager.getActiveUserId()): Flow<List<Account>> = flow {
+        emit(dbHelper.getAccounts(userId))
         dbHelper.dbChangeSignal.collect {
-            emit(dbHelper.getAccounts())
+            emit(dbHelper.getAccounts(userId))
         }
     }.flowOn(Dispatchers.IO)
 
@@ -67,15 +78,15 @@ class TransactionRepository(context: Context) {
         }
     }.flowOn(Dispatchers.IO)
 
-    suspend fun getReconciliationLogs(accountId: String? = null): List<ReconciliationLog> =
+    suspend fun getReconciliationLogs(accountId: String? = null, userId: String = sessionManager.getActiveUserId()): List<ReconciliationLog> =
         withContext(Dispatchers.IO) {
-            dbHelper.getReconciliationLogs(accountId)
+            dbHelper.getReconciliationLogs(accountId).filter { it.userId == userId }
         }
 
-    fun getImportedSmsAlerts(): Flow<List<ImportedSmsAlert>> = flow {
-        emit(dbHelper.getImportedSmsAlerts())
+    fun getImportedSmsAlerts(userId: String = sessionManager.getActiveUserId()): Flow<List<ImportedSmsAlert>> = flow {
+        emit(dbHelper.getImportedSmsAlerts(userId))
         dbHelper.dbChangeSignal.collect {
-            emit(dbHelper.getImportedSmsAlerts())
+            emit(dbHelper.getImportedSmsAlerts(userId))
         }
     }.flowOn(Dispatchers.IO)
 
@@ -83,6 +94,63 @@ class TransactionRepository(context: Context) {
         dbHelper.resolveImportedSmsAlert(alertId, selectedAccountId)
     }
 
+    // --- Verification System ---
+    fun getVerificationEvents(userId: String = sessionManager.getActiveUserId()): Flow<List<VerificationEvent>> = flow {
+        emit(dbHelper.getVerificationEvents(userId))
+        dbHelper.dbChangeSignal.collect {
+            emit(dbHelper.getVerificationEvents(userId))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    suspend fun resolveVerificationEvent(
+        eventId: String,
+        status: VerificationStatus,
+        resolvedAccountId: String? = null,
+        userId: String = sessionManager.getActiveUserId()
+    ): Boolean = withContext(Dispatchers.IO) {
+        dbHelper.resolveVerificationEvent(eventId, status, userId)
+    }
+
+    // --- Audit Logs ---
+    suspend fun getAuditLogs(userId: String = sessionManager.getActiveUserId()): List<AuditLog> =
+        withContext(Dispatchers.IO) {
+            dbHelper.getAuditLogs(userId)
+        }
+
+    // --- Financial Intelligence ---
+    fun getFinancialInsights(userId: String = sessionManager.getActiveUserId()): Flow<List<FinancialInsight>> = flow {
+        emit(intelligenceEngine.generateInsights(userId))
+        dbHelper.dbChangeSignal.collect {
+            emit(intelligenceEngine.generateInsights(userId))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    suspend fun queryFinancialIntelligence(query: String, userId: String = sessionManager.getActiveUserId()): IntelligenceAnswer =
+        withContext(Dispatchers.IO) {
+            intelligenceEngine.answerFinancialQuestion(query, userId)
+        }
+
+    // --- Multi-User Management ---
+    suspend fun getUsers(): List<User> = withContext(Dispatchers.IO) {
+        dbHelper.getUsers()
+    }
+
+    suspend fun createUser(name: String, email: String? = null): User = withContext(Dispatchers.IO) {
+        val user = User(
+            id = UUID.randomUUID().toString(),
+            name = name,
+            email = email,
+            createdAt = System.currentTimeMillis()
+        )
+        dbHelper.insertUser(user)
+        user
+    }
+
+    fun switchUser(user: User) {
+        sessionManager.switchUser(user.id, user.name)
+    }
+
+    // --- Manual Transactions & Bill Paid Operations ---
     suspend fun addManualTransaction(
         accountId: String,
         categoryId: String,
@@ -91,10 +159,12 @@ class TransactionRepository(context: Context) {
         kind: TransactionKind = if (direction == TransactionDirection.DEBIT) TransactionKind.EXPENSE else TransactionKind.INCOME,
         merchant: String,
         destinationAccountId: String? = null,
-        note: String? = null
+        note: String? = null,
+        userId: String = sessionManager.getActiveUserId()
     ): Boolean = withContext(Dispatchers.IO) {
         val txn = Transaction(
             id = UUID.randomUUID().toString(),
+            userId = userId,
             accountId = accountId,
             sourceAccountId = accountId,
             destinationAccountId = destinationAccountId,
@@ -110,37 +180,46 @@ class TransactionRepository(context: Context) {
         dbHelper.insertTransaction(txn)
     }
 
+    /**
+     * Mark a credit card bill as Paid.
+     * Intelligently recalculates available credit and liability, records transaction, and logs audit record.
+     */
+    suspend fun confirmBillPaid(
+        creditCardId: String,
+        amountPaid: Double,
+        sourceBankAccountId: String? = null,
+        notes: String? = null,
+        userId: String = sessionManager.getActiveUserId()
+    ): Boolean = withContext(Dispatchers.IO) {
+        dbHelper.confirmBillPaid(
+            creditCardId = creditCardId,
+            amountPaid = amountPaid,
+            payingBankAccountId = sourceBankAccountId,
+            note = notes,
+            userId = userId
+        )
+    }
+
+    @Deprecated("Replaced with confirmBillPaid() to reflect user recording instead of gateway processing")
     suspend fun payCreditCardBill(
         sourceBankAccountId: String,
         creditCardAccountId: String,
         amount: Double,
         notes: String? = null
-    ): Boolean = withContext(Dispatchers.IO) {
-        dbHelper.recordCreditCardPayment(
-            sourceBankAccountId = sourceBankAccountId,
-            creditCardId = creditCardAccountId,
-            amount = amount,
-            referenceNumber = null,
-            note = notes
-        )
-    }
-
-    suspend fun recordCreditCardPayment(
-        sourceBankAccountId: String,
-        creditCardId: String,
-        amount: Double,
-        referenceNumber: String? = null,
-        note: String? = null
-    ): Boolean = withContext(Dispatchers.IO) {
-        dbHelper.recordCreditCardPayment(sourceBankAccountId, creditCardId, amount, referenceNumber, note)
-    }
+    ): Boolean = confirmBillPaid(
+        creditCardId = creditCardAccountId,
+        amountPaid = amount,
+        sourceBankAccountId = sourceBankAccountId,
+        notes = notes
+    )
 
     suspend fun recordBankTransfer(
         sourceBankAccountId: String,
         destinationBankAccountId: String,
         amount: Double,
         referenceNumber: String? = null,
-        note: String? = null
+        note: String? = null,
+        userId: String = sessionManager.getActiveUserId()
     ): Boolean = withContext(Dispatchers.IO) {
         dbHelper.recordBankTransfer(sourceBankAccountId, destinationBankAccountId, amount, referenceNumber, note)
     }
@@ -172,11 +251,6 @@ class TransactionRepository(context: Context) {
             dbHelper.updateCurrentBalance(accountId, newBalance)
         }
 
-    suspend fun updateInitialBalance(accountId: String, newBalance: Double): Boolean =
-        withContext(Dispatchers.IO) {
-            dbHelper.updateCurrentBalance(accountId, newBalance)
-        }
-
     suspend fun updateAccount(account: Account, targetCurrentBalance: Double? = null): Boolean =
         withContext(Dispatchers.IO) {
             dbHelper.updateAccount(account, targetCurrentBalance)
@@ -195,11 +269,12 @@ class TransactionRepository(context: Context) {
     }
 
     /**
-     * Unified, battery-efficient SMS Processing Pipeline.
-     * Invoked by both SmsBroadcastReceiver and manual Simulator.
+     * Production Battery-efficient SMS Processing Pipeline.
+     * Invoked exclusively by SmsBroadcastReceiver upon receiving real incoming financial SMS messages.
      */
     suspend fun processIncomingSms(sender: String?, fullBody: String): Boolean = withContext(Dispatchers.IO) {
         if (fullBody.isBlank()) return@withContext false
+        val activeUserId = sessionManager.getActiveUserId()
 
         // 1. Regex Parsing & Fraud/OTP filtering
         val parsed = IndianBankSmsParser.parse(sender, fullBody)
@@ -210,7 +285,8 @@ class TransactionRepository(context: Context) {
                     body = fullBody,
                     status = SmsAlertStatus.IGNORED,
                     confidence = 0.0,
-                    reason = "Non-financial, OTP, or promotional message"
+                    reason = "Non-financial, OTP, or promotional message",
+                    userId = activeUserId
                 )
             )
             return@withContext false
@@ -226,7 +302,6 @@ class TransactionRepository(context: Context) {
             timestamp = parsed.timestamp
         )
 
-        // Check if transaction with this fingerprint or ref number already exists
         val duplicateByFp = dbHelper.findTransactionByFingerprint(fingerprint)
         val duplicateByRef = if (!parsed.referenceNumber.isNullOrBlank()) {
             dbHelper.findTransactionByRefNumber(parsed.referenceNumber)
@@ -242,21 +317,22 @@ class TransactionRepository(context: Context) {
                     status = SmsAlertStatus.DUPLICATE,
                     transactionId = duplicateByFp?.id ?: duplicateByRef?.id,
                     confidence = 1.0,
-                    reason = "Duplicate alert dropped by fingerprint / UTR check"
+                    reason = "Duplicate alert dropped by fingerprint / UTR check",
+                    userId = activeUserId
                 )
             )
-            return@withContext true // Handled safely without double-inserting
+            return@withContext true
         }
 
         // 3. Intelligent Account Identification
-        val matchResult = accountEngine.identifyAccount(parsed, sender, fullBody)
+        val matchResult = accountEngine.identifyAccount(parsed, sender, fullBody, activeUserId)
         var account = matchResult.account
 
-        // If no accounts exist yet, create a default one based on parsed metadata
         if (account == null) {
             val isCard = parsed.instrumentType == FinancialInstrumentType.CREDIT_CARD
             val newAcc = Account(
                 id = UUID.randomUUID().toString(),
+                userId = activeUserId,
                 name = if (isCard) "${parsed.bankName} Credit Card" else "${parsed.bankName} Account",
                 bankName = parsed.bankName,
                 accountType = if (isCard) AccountType.CREDIT_CARD else AccountType.BANK_ACCOUNT,
@@ -270,25 +346,36 @@ class TransactionRepository(context: Context) {
             account = newAcc
         }
 
-        // 4. Handle Credit Card Bill Payment detection
+        // 4. Handle Credit Card Bill Payment detection & reconciliation
         if (parsed.kind == TransactionKind.CARD_PAYMENT && account.isCreditCard) {
             val paymentResult = ccPaymentEngine.processPaymentSms(parsed, account, fullBody)
-            val paymentTxn = paymentResult.transaction.copy(fingerprint = fingerprint)
-            dbHelper.insertTransaction(paymentTxn)
+            val paymentTxnId = if (!paymentResult.wasReconciledWithManual) {
+                val paymentTxn = paymentResult.transaction.copy(fingerprint = fingerprint, userId = activeUserId)
+                dbHelper.insertTransaction(paymentTxn)
+                paymentTxn.id
+            } else {
+                paymentResult.transaction.id
+            }
 
             dbHelper.insertImportedSms(
                 ImportedSmsAlert(
                     sender = sender ?: "Unknown",
                     body = fullBody,
                     status = if (paymentResult.needsSourceConfirmation) SmsAlertStatus.NEEDS_REVIEW else SmsAlertStatus.PROCESSED,
-                    transactionId = paymentTxn.id,
+                    transactionId = paymentTxnId,
                     accountId = account.id,
                     confidence = matchResult.confidence,
-                    reason = if (paymentResult.needsSourceConfirmation) "Source bank account for payment needs confirmation" else "Credit Card bill payment processed"
+                    reason = if (paymentResult.wasReconciledWithManual) {
+                        paymentResult.reconciliationMessage ?: "Payment reconciled with previous manual bill confirmation"
+                    } else if (paymentResult.needsSourceConfirmation) {
+                        "Source bank account for payment needs confirmation"
+                    } else {
+                        "Credit Card bill payment processed"
+                    },
+                    userId = activeUserId
                 )
             )
 
-            // Reconcile available credit if provided
             if (parsed.availableCredit != null && account.creditLimit > 0) {
                 val newOutstanding = maxOf(0.0, account.creditLimit - parsed.availableCredit)
                 reconciliationEngine.reconcile(account, newOutstanding, parsed.timestamp)
@@ -316,6 +403,7 @@ class TransactionRepository(context: Context) {
         // 7. Assemble and Insert Transaction
         val transaction = Transaction(
             id = UUID.randomUUID().toString(),
+            userId = activeUserId,
             accountId = account.id,
             sourceAccountId = sourceAccId,
             destinationAccountId = destAccId,
@@ -342,7 +430,6 @@ class TransactionRepository(context: Context) {
         if (parsed.availableBalance != null && !account.isCreditCard) {
             reconciliationEngine.reconcile(account, parsed.availableBalance, parsed.timestamp)
         } else if (parsed.availableCredit != null && account.isCreditCard) {
-            // Update available credit metadata
             val updatedCc = account.copy(
                 availableCredit = parsed.availableCredit,
                 lastConfirmedBalance = parsed.availableCredit,
@@ -374,14 +461,11 @@ class TransactionRepository(context: Context) {
                 transactionId = transaction.id,
                 accountId = account.id,
                 confidence = matchResult.confidence,
-                reason = if (matchResult.needsReview) matchResult.matchReason else "Transaction recorded successfully"
+                reason = if (matchResult.needsReview) matchResult.matchReason else "Transaction recorded successfully",
+                userId = activeUserId
             )
         )
 
         return@withContext true
-    }
-
-    suspend fun simulateIncomingSms(sender: String, body: String): Boolean {
-        return processIncomingSms(sender, body)
     }
 }

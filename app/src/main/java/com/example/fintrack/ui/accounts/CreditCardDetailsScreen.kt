@@ -199,11 +199,11 @@ fun CreditCardDetailsScreen(
                     onClick = onPayCardClick,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
                 ) {
-                    Icon(AppIcons.CreditCard, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(AppIcons.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Pay Bill")
+                    Text("Bill Paid")
                 }
 
                 OutlinedButton(

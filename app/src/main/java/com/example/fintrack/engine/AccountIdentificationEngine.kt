@@ -32,13 +32,32 @@ class AccountIdentificationEngine(private val dbHelper: AppDatabaseHelper? = nul
     }
 
     /**
+     * Resolves the matching account for a parsed financial SMS with an explicit list of accounts.
+     */
+    fun identifyAccount(
+        parsed: ParsedTransaction,
+        sender: String?,
+        smsBody: String,
+        accounts: List<Account>,
+        aliases: List<AccountAlias> = emptyList()
+    ): AccountMatchResult = identifyAccount(
+        parsed = parsed,
+        sender = sender,
+        smsBody = smsBody,
+        userId = com.example.fintrack.data.model.User.DEFAULT_USER_ID,
+        accounts = accounts,
+        aliases = aliases
+    )
+
+    /**
      * Resolves the matching account for a parsed financial SMS.
      */
     fun identifyAccount(
         parsed: ParsedTransaction,
         sender: String?,
         smsBody: String,
-        accounts: List<Account> = dbHelper?.getAccounts() ?: emptyList(),
+        userId: String = com.example.fintrack.data.model.User.DEFAULT_USER_ID,
+        accounts: List<Account> = dbHelper?.getAccounts(userId) ?: emptyList(),
         aliases: List<AccountAlias> = dbHelper?.getAccountAliases() ?: emptyList()
     ): AccountMatchResult {
         if (accounts.isEmpty()) {
