@@ -34,15 +34,41 @@ enum class BankAccountType {
 }
 
 enum class BillStatus {
-    UPCOMING,
     GENERATED,
-    DUE_SOON,
+    UPCOMING,
+    DUE,
+    PAYMENT_DETECTED,
+    USER_CONFIRMED,
+    VERIFIED,
     PAID,
     OVERDUE,
     UNKNOWN;
 
     companion object {
         fun fromString(statusStr: String?): BillStatus {
+            if (statusStr == null) return UNKNOWN
+            val clean = statusStr.uppercase().trim()
+            if (clean == "DUE_SOON") return DUE
+            return try {
+                valueOf(clean)
+            } catch (_: Exception) {
+                UNKNOWN
+            }
+        }
+    }
+}
+
+enum class PaymentStatus {
+    DETECTED,
+    PENDING,
+    SUCCESSFUL,
+    FAILED,
+    REVERSED,
+    REJECTED,
+    UNKNOWN;
+
+    companion object {
+        fun fromString(statusStr: String?): PaymentStatus {
             if (statusStr == null) return UNKNOWN
             return try {
                 valueOf(statusStr.uppercase().trim())

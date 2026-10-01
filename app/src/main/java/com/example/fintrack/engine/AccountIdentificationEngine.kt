@@ -134,6 +134,15 @@ class AccountIdentificationEngine(private val dbHelper: AppDatabaseHelper? = nul
                         needsReview = false
                     )
                 }
+            } else {
+                // SMS specifies last4, but user has no account matching this last4.
+                // Do NOT guess or modify a different card/account.
+                return AccountMatchResult(
+                    account = null,
+                    confidence = CONFIDENCE_UNKNOWN,
+                    matchReason = "SMS mentions ${if (targetIsCard) "Credit Card" else "Account"} ending ••$last4, which does not match any configured account.",
+                    needsReview = true
+                )
             }
         }
 

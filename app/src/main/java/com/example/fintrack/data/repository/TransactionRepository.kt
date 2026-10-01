@@ -7,15 +7,19 @@ import com.example.fintrack.data.model.Account
 import com.example.fintrack.data.model.AccountType
 import com.example.fintrack.data.model.AuditLog
 import com.example.fintrack.data.model.BankAccountType
+import com.example.fintrack.data.model.BillStatus
 import com.example.fintrack.data.model.Category
 import com.example.fintrack.data.model.DashboardSummary
 import com.example.fintrack.data.model.ImportedSmsAlert
+import com.example.fintrack.data.model.MessageRule
+import com.example.fintrack.data.model.MessageRuleAction
 import com.example.fintrack.data.model.ReconciliationLog
 import com.example.fintrack.data.model.SmsAlertStatus
 import com.example.fintrack.data.model.TimePeriod
 import com.example.fintrack.data.model.Transaction
 import com.example.fintrack.data.model.TransactionDirection
 import com.example.fintrack.data.model.TransactionKind
+import com.example.fintrack.data.model.TransactionStatus
 import com.example.fintrack.data.model.TransactionWithDetails
 import com.example.fintrack.data.model.User
 import com.example.fintrack.data.model.VerificationEvent
@@ -268,13 +272,84 @@ class TransactionRepository(context: Context) {
         dbHelper.insertCategory(category)
     }
 
+    // --- Transaction Review & Message Rules ---
+    fun getPendingReviewTransactions(userId: String = sessionManager.getActiveUserId()): Flow<List<TransactionWithDetails>> = flow {
+        emit(dbHelper.getPendingReviewTransactions(userId))
+        dbHelper.dbChangeSignal.collect {
+            emit(dbHelper.getPendingReviewTransactions(userId))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    suspend fun confirmCreditCardTransaction(
+        transactionId: String,
+        creditCardId: String,
+        userId: String = sessionManager.getActiveUserId()
+    ): Boolean = withContext(Dispatchers.IO) {
+        dbHelper.confirmCreditCardTransaction(transactionId, creditCardId, userId)
+    }
+
+    suspend fun confirmCreditCardPayment(
+        transactionId: String,
+        creditCardId: String,
+        payingBankAccountId: String?,
+        amount: Double,
+        userId: String = sessionManager.getActiveUserId()
+    ): Boolean = withContext(Dispatchers.IO) {
+        dbHelper.confirmCreditCardPayment(transactionId, creditCardId, payingBankAccountId, amount, userId)
+    }
+
+    suspend fun rejectTransaction(
+        transactionId: String,
+        reason: String = "Marked as not relevant by user",
+        learnRule: Boolean = false,
+        userId: String = sessionManager.getActiveUserId()
+    ): Boolean = withContext(Dispatchers.IO) {
+        dbHelper.rejectTransaction(transactionId, reason, learnRule, userId)
+    }
+
+    suspend fun reverseTransaction(
+        transactionId: String,
+        reason: String = "Reversed by user",
+        userId: String = sessionManager.getActiveUserId()
+    ): Boolean = withContext(Dispatchers.IO) {
+        dbHelper.reverseTransaction(transactionId, reason, userId)
+    }
+
+    fun getMessageRules(userId: String = sessionManager.getActiveUserId()): Flow<List<MessageRule>> = flow {
+        emit(dbHelper.getMessageRules(userId))
+        dbHelper.dbChangeSignal.collect {
+            emit(dbHelper.getMessageRules(userId))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    suspend fun deleteMessageRule(ruleId: String): Boolean = withContext(Dispatchers.IO) {
+        dbHelper.deleteMessageRule(ruleId)
+    }
+
     /**
      * Production Battery-efficient SMS Processing Pipeline.
      * Invoked exclusively by SmsBroadcastReceiver upon receiving real incoming financial SMS messages.
+     * Adheres to: DETECTED -> UNDERSTOOD -> REVIEW REQUIRED -> USER CONFIRMED -> FINANCIAL STATE UPDATED
      */
     suspend fun processIncomingSms(sender: String?, fullBody: String): Boolean = withContext(Dispatchers.IO) {
         if (fullBody.isBlank()) return@withContext false
         val activeUserId = sessionManager.getActiveUserId()
+
+        // 0. Check User-Learned Message Rules (safe false-positive filter suppression)
+        val matchedRule = dbHelper.findMatchingMessageRule(sender, fullBody)
+        if (matchedRule != null && matchedRule.action == MessageRuleAction.IGNORE) {
+            dbHelper.insertImportedSms(
+                ImportedSmsAlert(
+                    sender = sender ?: "Unknown",
+                    body = fullBody,
+                    status = SmsAlertStatus.IGNORED,
+                    confidence = 1.0,
+                    reason = "Suppressed by learned user rule: ${matchedRule.description.ifBlank { matchedRule.senderPattern }}",
+                    userId = activeUserId
+                )
+            )
+            return@withContext true
+        }
 
         // 1. Regex Parsing & Fraud/OTP filtering
         val parsed = IndianBankSmsParser.parse(sender, fullBody)
@@ -292,7 +367,7 @@ class TransactionRepository(context: Context) {
             return@withContext false
         }
 
-        // 2. Duplicate Detection via Fingerprinting
+        // 2. Duplicate Detection via Fingerprinting & UTR
         val fingerprint = SmsFingerprintEngine.generateFingerprint(
             bankName = parsed.bankName,
             amount = parsed.amount,
@@ -326,36 +401,88 @@ class TransactionRepository(context: Context) {
 
         // 3. Intelligent Account Identification
         val matchResult = accountEngine.identifyAccount(parsed, sender, fullBody, activeUserId)
-        var account = matchResult.account
+        val account = matchResult.account
+        val needsReview = matchResult.needsReview || account == null
+        val targetAccountId = account?.id ?: ""
+        val initialStatus = if (needsReview) TransactionStatus.PENDING_REVIEW else TransactionStatus.CONFIRMED
 
-        if (account == null) {
-            val isCard = parsed.instrumentType == FinancialInstrumentType.CREDIT_CARD
-            val newAcc = Account(
+        // 4. Handle Credit Card Bill Statement / Due notice (Informational only, not an expense, NEVER marked as PAID)
+        if (parsed.kind == TransactionKind.CARD_BILL_DUE || parsed.kind == TransactionKind.CARD_BILL_GENERATED) {
+            val newBillStatus = if (parsed.kind == TransactionKind.CARD_BILL_GENERATED) BillStatus.GENERATED else BillStatus.DUE
+
+            if (account != null && account.isCreditCard) {
+                val updatedCc = account.copy(
+                    totalDue = parsed.totalDue ?: parsed.amount,
+                    minimumDue = parsed.minimumDue ?: account.minimumDue,
+                    paymentDueDate = parsed.dueDate ?: account.paymentDueDate,
+                    billStatus = newBillStatus
+                )
+                dbHelper.updateAccount(updatedCc)
+            }
+
+            val stmtTxn = Transaction(
                 id = UUID.randomUUID().toString(),
                 userId = activeUserId,
-                name = if (isCard) "${parsed.bankName} Credit Card" else "${parsed.bankName} Account",
-                bankName = parsed.bankName,
-                accountType = if (isCard) AccountType.CREDIT_CARD else AccountType.BANK_ACCOUNT,
-                bankAccountType = BankAccountType.SAVINGS,
-                accountNumberLast4 = parsed.accountNumberLast4,
-                creditLimit = if (isCard) 50000.0 else 0.0,
-                initialBalance = 0.0,
-                colorHex = if (isCard) 0xFF1E293B else 0xFF1976D2
+                accountId = targetAccountId,
+                sourceAccountId = targetAccountId,
+                categoryId = "cat_bills",
+                amount = parsed.amount,
+                direction = TransactionDirection.DEBIT,
+                kind = parsed.kind,
+                timestamp = parsed.timestamp,
+                merchant = parsed.merchant,
+                rawSmsBody = fullBody,
+                smsSender = sender,
+                referenceNumber = parsed.referenceNumber,
+                isManual = false,
+                needsReview = needsReview,
+                reviewReason = if (needsReview) matchResult.matchReason else null,
+                status = initialStatus,
+                fingerprint = fingerprint
             )
-            dbHelper.insertAccount(newAcc)
-            account = newAcc
+            dbHelper.insertTransaction(stmtTxn)
+
+            dbHelper.insertImportedSms(
+                ImportedSmsAlert(
+                    sender = sender ?: "Unknown",
+                    body = fullBody,
+                    status = if (needsReview) SmsAlertStatus.NEEDS_REVIEW else SmsAlertStatus.PROCESSED,
+                    transactionId = stmtTxn.id,
+                    accountId = account?.id,
+                    confidence = matchResult.confidence,
+                    reason = if (needsReview) matchResult.matchReason else "Credit card bill statement / due notice updated",
+                    userId = activeUserId
+                )
+            )
+            return@withContext true
         }
 
-        // 4. Handle Credit Card Bill Payment detection & reconciliation
-        if (parsed.kind == TransactionKind.CARD_PAYMENT && account.isCreditCard) {
+        // 5. Handle Credit Card Bill Payment detection & reconciliation
+        if (parsed.kind == TransactionKind.CARD_PAYMENT && account != null && account.isCreditCard) {
             val paymentResult = ccPaymentEngine.processPaymentSms(parsed, account, fullBody)
             val paymentTxnId = if (!paymentResult.wasReconciledWithManual) {
-                val paymentTxn = paymentResult.transaction.copy(fingerprint = fingerprint, userId = activeUserId)
+                val paymentTxn = paymentResult.transaction.copy(
+                    fingerprint = fingerprint,
+                    userId = activeUserId,
+                    status = if (paymentResult.needsSourceConfirmation) TransactionStatus.PENDING_REVIEW else TransactionStatus.CONFIRMED
+                )
                 dbHelper.insertTransaction(paymentTxn)
                 paymentTxn.id
             } else {
                 paymentResult.transaction.id
             }
+
+            // Update card billStatus based on verification confidence
+            val newBillStatus = if (paymentResult.wasReconciledWithManual || !paymentResult.needsSourceConfirmation) {
+                BillStatus.PAID
+            } else {
+                BillStatus.PAYMENT_DETECTED
+            }
+            val updatedCc = account.copy(
+                billStatus = newBillStatus,
+                availableCredit = parsed.availableCredit ?: account.availableCredit
+            )
+            dbHelper.updateAccount(updatedCc)
 
             dbHelper.insertImportedSms(
                 ImportedSmsAlert(
@@ -368,7 +495,7 @@ class TransactionRepository(context: Context) {
                     reason = if (paymentResult.wasReconciledWithManual) {
                         paymentResult.reconciliationMessage ?: "Payment reconciled with previous manual bill confirmation"
                     } else if (paymentResult.needsSourceConfirmation) {
-                        "Source bank account for payment needs confirmation"
+                        "Payment detected towards ${account.name}; source bank account needs confirmation"
                     } else {
                         "Credit Card bill payment processed"
                     },
@@ -376,19 +503,19 @@ class TransactionRepository(context: Context) {
                 )
             )
 
-            if (parsed.availableCredit != null && account.creditLimit > 0) {
+            if (!paymentResult.needsSourceConfirmation && parsed.availableCredit != null && account.creditLimit > 0) {
                 val newOutstanding = maxOf(0.0, account.creditLimit - parsed.availableCredit)
                 reconciliationEngine.reconcile(account, newOutstanding, parsed.timestamp)
             }
             return@withContext true
         }
 
-        // 5. Handle Transfer Matching
-        var sourceAccId = account.id
+        // 6. Handle Transfer Matching
+        var sourceAccId = targetAccountId
         var destAccId: String? = null
         var txnKind = parsed.kind
 
-        if (parsed.kind == TransactionKind.BANK_TRANSFER && !account.isCreditCard) {
+        if (parsed.kind == TransactionKind.BANK_TRANSFER && account != null && !account.isCreditCard) {
             val transferMatch = transferEngine.matchTransfer(parsed, account, fullBody)
             if (transferMatch.isTransfer) {
                 sourceAccId = transferMatch.sourceAccount?.id ?: account.id
@@ -397,14 +524,14 @@ class TransactionRepository(context: Context) {
             }
         }
 
-        // 6. Categorization
+        // 7. Categorization
         val catId = categorizer.categorize(parsed.merchant, fullBody, parsed.direction)
 
-        // 7. Assemble and Insert Transaction
+        // 8. Assemble and Insert Transaction
         val transaction = Transaction(
             id = UUID.randomUUID().toString(),
             userId = activeUserId,
-            accountId = account.id,
+            accountId = targetAccountId,
             sourceAccountId = sourceAccId,
             destinationAccountId = destAccId,
             categoryId = catId,
@@ -419,37 +546,40 @@ class TransactionRepository(context: Context) {
             balanceAfterTxn = parsed.availableBalance,
             availableCreditAfterTxn = parsed.availableCredit,
             isManual = false,
-            needsReview = matchResult.needsReview,
-            reviewReason = if (matchResult.needsReview) matchResult.matchReason else null,
+            needsReview = needsReview,
+            reviewReason = if (needsReview) matchResult.matchReason else null,
+            status = initialStatus,
             fingerprint = fingerprint
         )
 
         dbHelper.insertTransaction(transaction)
 
-        // 8. Reconcile Balance / Credit if official numbers present
-        if (parsed.availableBalance != null && !account.isCreditCard) {
-            reconciliationEngine.reconcile(account, parsed.availableBalance, parsed.timestamp)
-        } else if (parsed.availableCredit != null && account.isCreditCard) {
-            val updatedCc = account.copy(
-                availableCredit = parsed.availableCredit,
-                lastConfirmedBalance = parsed.availableCredit,
-                lastConfirmedAt = parsed.timestamp
-            )
-            dbHelper.updateAccount(updatedCc)
-            if (account.creditLimit > 0) {
-                val confirmedOutstanding = maxOf(0.0, account.creditLimit - parsed.availableCredit)
-                reconciliationEngine.reconcile(account, confirmedOutstanding, parsed.timestamp)
+        // 9. Reconcile Balance / Credit ONLY if CONFIRMED and account is known
+        if (!needsReview) {
+            if (parsed.availableBalance != null && !account.isCreditCard) {
+                reconciliationEngine.reconcile(account, parsed.availableBalance, parsed.timestamp)
+            } else if (parsed.availableCredit != null && account.isCreditCard) {
+                val updatedCc = account.copy(
+                    availableCredit = parsed.availableCredit,
+                    lastConfirmedBalance = parsed.availableCredit,
+                    lastConfirmedAt = parsed.timestamp
+                )
+                dbHelper.updateAccount(updatedCc)
+                if (account.creditLimit > 0) {
+                    val confirmedOutstanding = maxOf(0.0, account.creditLimit - parsed.availableCredit)
+                    reconciliationEngine.reconcile(account, confirmedOutstanding, parsed.timestamp)
+                }
             }
-        }
 
-        // 9. Update Dues / Due Dates on Credit Card if present
-        if (account.isCreditCard && (parsed.totalDue != null || parsed.minimumDue != null || parsed.dueDate != null)) {
-            val updatedCc = account.copy(
-                totalDue = parsed.totalDue ?: account.totalDue,
-                minimumDue = parsed.minimumDue ?: account.minimumDue,
-                paymentDueDate = parsed.dueDate ?: account.paymentDueDate
-            )
-            dbHelper.updateAccount(updatedCc)
+            // Update Dues / Due Dates on Credit Card if present
+            if (account.isCreditCard && (parsed.totalDue != null || parsed.minimumDue != null || parsed.dueDate != null)) {
+                val updatedCc = account.copy(
+                    totalDue = parsed.totalDue ?: account.totalDue,
+                    minimumDue = parsed.minimumDue ?: account.minimumDue,
+                    paymentDueDate = parsed.dueDate ?: account.paymentDueDate
+                )
+                dbHelper.updateAccount(updatedCc)
+            }
         }
 
         // 10. Record in Imported SMS Audit Table
@@ -457,11 +587,11 @@ class TransactionRepository(context: Context) {
             ImportedSmsAlert(
                 sender = sender ?: "Unknown",
                 body = fullBody,
-                status = if (matchResult.needsReview) SmsAlertStatus.NEEDS_REVIEW else SmsAlertStatus.PROCESSED,
+                status = if (needsReview) SmsAlertStatus.NEEDS_REVIEW else SmsAlertStatus.PROCESSED,
                 transactionId = transaction.id,
-                accountId = account.id,
+                accountId = account?.id,
                 confidence = matchResult.confidence,
-                reason = if (matchResult.needsReview) matchResult.matchReason else "Transaction recorded successfully",
+                reason = if (needsReview) matchResult.matchReason else "Transaction recorded successfully",
                 userId = activeUserId
             )
         )

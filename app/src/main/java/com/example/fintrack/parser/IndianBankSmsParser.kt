@@ -43,6 +43,10 @@ object IndianBankSmsParser {
         Pattern.compile("\\b(?:received\\s+towards.*?card|payment.*?towards.*?card|card\\s+payment\\s+received|paid\\s+towards.*?credit\\s*card|thank\\s+you\\s+for\\s+payment.*?card)\\b", Pattern.CASE_INSENSITIVE)
     )
 
+    private val CARD_BILL_STATEMENT_PATTERNS = listOf(
+        Pattern.compile("\\b(?:statement\\s+(?:generated|for\\s+your|dated)|bill\\s+generated|e-statement|total\\s+amt(?:ount)?\\s+due|min(?:imum)?\\s+amt(?:ount)?\\s+due)\\b", Pattern.CASE_INSENSITIVE)
+    )
+
     private val TRANSFER_PATTERNS = listOf(
         Pattern.compile("\\b(?:transferred\\s+to|transfer\\s+to|imps\\s+to|neft\\s+to|sent\\s+to\\s+[a-zA-Z0-9@_.-]+)\\b", Pattern.CASE_INSENSITIVE)
     )
@@ -79,13 +83,13 @@ object IndianBankSmsParser {
 
     // Total Amount Due pattern
     private val TOTAL_DUE_PATTERN = Pattern.compile(
-        "(?:total\\s*(?:amt|amount)?\\s*due|tot\\s*due)\\s*(?:is|:|–|-)?\\s*(?:inr|rs\\.?|rs)?\\s*(?:is|:|–|-)?\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
+        "(?:total\\s*(?:amt|amount)?\\s*due|tot\\s*due).*?(?:(?:inr|rs\\.?|rs)\\s*(?:is|:|–|-)?|(?:is|:|–|-)\\s*(?:inr|rs\\.?|rs)?)\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
         Pattern.CASE_INSENSITIVE
     )
 
     // Minimum Amount Due pattern
     private val MIN_DUE_PATTERN = Pattern.compile(
-        "(?:min(?:imum)?\\s*(?:amt|amount)?\\s*due)\\s*(?:is|:|–|-)?\\s*(?:inr|rs\\.?|rs)?\\s*(?:is|:|–|-)?\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
+        "(?:min(?:imum)?\\s*(?:amt|amount)?\\s*due).*?(?:(?:inr|rs\\.?|rs)\\s*(?:is|:|–|-)?|(?:is|:|–|-)\\s*(?:inr|rs\\.?|rs)?)\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
         Pattern.CASE_INSENSITIVE
     )
 
@@ -130,7 +134,7 @@ object IndianBankSmsParser {
         }
 
         // 2. Extract Amount (mandatory for transactions or due statements)
-        val amount = extractAmount(messageBody) ?: return null
+        val amount = extractAmount(messageBody) ?: extractTotalDue(messageBody) ?: extractMinDue(messageBody) ?: return null
 
         // 3. Classify Financial Instrument: BANK_ACCOUNT vs CREDIT_CARD
         var cardSignals = 0
@@ -214,10 +218,10 @@ object IndianBankSmsParser {
                 kind = TransactionKind.EXPENSE
             }
             else -> {
-                // If it mentions Total Amt Due, treat as statement or CC info
-                if (TOTAL_DUE_PATTERN.matcher(messageBody).find()) {
+                // If it mentions Total Amt Due, statement, or CC info, treat as statement liability notice
+                if (TOTAL_DUE_PATTERN.matcher(messageBody).find() || CARD_BILL_STATEMENT_PATTERNS.any { it.matcher(messageBody).find() }) {
                     direction = TransactionDirection.DEBIT
-                    kind = TransactionKind.CARD_PAYMENT
+                    kind = if (messageBody.contains("generated", ignoreCase = true)) TransactionKind.CARD_BILL_GENERATED else TransactionKind.CARD_BILL_DUE
                 } else {
                     return null // Neither credit nor debit recognized
                 }
@@ -382,6 +386,7 @@ object IndianBankSmsParser {
         return when (kind) {
             TransactionKind.ATM_WITHDRAWAL -> "ATM Cash Withdrawal"
             TransactionKind.CARD_PAYMENT -> "Credit Card Payment"
+            TransactionKind.CARD_BILL_DUE, TransactionKind.CARD_BILL_GENERATED -> "$bankName Card Statement / Due"
             TransactionKind.BANK_TRANSFER -> "Bank Transfer"
             TransactionKind.REFUND -> "Refund / Reversal"
             TransactionKind.REVERSAL -> "Transaction Reversal"

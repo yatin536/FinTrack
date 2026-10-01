@@ -10,17 +10,46 @@ enum class TransactionDirection {
 // Backward-compatible alias for existing code
 typealias TransactionType = TransactionDirection
 
+enum class TransactionStatus {
+    CONFIRMED,
+    PENDING_REVIEW,
+    REJECTED,
+    DISMISSED;
+
+    companion object {
+        fun fromString(statusStr: String?): TransactionStatus {
+            if (statusStr == null) return CONFIRMED
+            return try {
+                valueOf(statusStr.uppercase().trim())
+            } catch (_: Exception) {
+                CONFIRMED
+            }
+        }
+    }
+}
+
 enum class TransactionKind {
     EXPENSE,
     INCOME,
     BANK_TRANSFER,
     CARD_PURCHASE,
     CARD_PAYMENT,
+    CARD_PAYMENT_SUCCESS,
+    CARD_PAYMENT_FAILED,
+    CARD_PAYMENT_REVERSED,
+    CARD_BILL_GENERATED,
+    CARD_BILL_DUE,
+    CARD_BILL_OVERDUE,
     REFUND,
     REVERSAL,
     ATM_WITHDRAWAL,
     CASH_DEPOSIT,
     CASH_WITHDRAWAL,
+    BANK_DEBIT,
+    BANK_CREDIT,
+    TRANSFER,
+    PROMOTIONAL,
+    OTP,
     ADJUSTMENT,
     UNKNOWN;
 
@@ -46,6 +75,7 @@ data class Transaction(
     val amount: Double,
     val direction: TransactionDirection = TransactionDirection.DEBIT,
     val kind: TransactionKind = TransactionKind.EXPENSE,
+    val status: TransactionStatus = TransactionStatus.CONFIRMED,
     val timestamp: Long = System.currentTimeMillis(),
     val merchant: String,
     val rawSmsBody: String? = null,

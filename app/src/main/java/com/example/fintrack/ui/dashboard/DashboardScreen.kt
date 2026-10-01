@@ -47,10 +47,12 @@ import com.example.fintrack.data.model.DashboardSummary
 import com.example.fintrack.data.model.TimePeriod
 import com.example.fintrack.data.model.TransactionDirection
 import com.example.fintrack.data.model.TransactionKind
+import com.example.fintrack.data.model.BillStatus
 import com.example.fintrack.data.model.TransactionWithDetails
 import com.example.fintrack.data.model.UpcomingCreditCardDue
 import com.example.fintrack.ui.components.CategoryBreakdownView
 import com.example.fintrack.ui.components.TrendBarChart
+import androidx.compose.material3.LinearProgressIndicator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -67,6 +69,11 @@ fun DashboardScreen(
     onAddManualClick: () -> Unit,
     pendingVerificationCount: Int = 0,
     onNavigateToVerification: () -> Unit = {},
+    pendingReviewTransactions: List<TransactionWithDetails> = emptyList(),
+    onReviewTransaction: (TransactionWithDetails) -> Unit = {},
+    creditCards: List<Account> = emptyList(),
+    onCardClick: (Account) -> Unit = {},
+    onManageAccountsClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val primaryAccount = summary.accounts.firstOrNull { it.isPrimary } ?: summary.accounts.firstOrNull()
@@ -109,6 +116,27 @@ fun DashboardScreen(
                         )
                     }
                 }
+
+                OutlinedButton(
+                    onClick = onManageAccountsClick,
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Icon(AppIcons.Bank, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Accounts", fontSize = 12.sp)
+                }
+            }
+        }
+
+        // Needs Your Review Queue (fast inline review flow)
+        if (pendingReviewTransactions.isNotEmpty()) {
+            item {
+                NeedsReviewSection(
+                    pendingTransactions = pendingReviewTransactions,
+                    onReviewClick = onReviewTransaction
+                )
             }
         }
 
@@ -171,6 +199,18 @@ fun DashboardScreen(
                     primaryAccount?.let { onAdjustBalanceClick(it) }
                 }
             )
+        }
+
+        // Credit Cards Section (Status, Spent vs Limit, Dues, and Mark Paid)
+        val cardsList = creditCards.ifEmpty { summary.accounts.filter { it.isCreditCard } }
+        if (cardsList.isNotEmpty()) {
+            item {
+                CreditCardsSection(
+                    cards = cardsList,
+                    onCardClick = onCardClick,
+                    onMarkBillPaid = onMarkBillPaidClick
+                )
+            }
         }
 
         // Upcoming Credit Card Dues (if any)
@@ -747,3 +787,303 @@ fun TransactionRow(
         }
     }
 }
+
+@Composable
+fun NeedsReviewSection(
+    pendingTransactions: List<TransactionWithDetails>,
+    onReviewClick: (TransactionWithDetails) -> Unit
+) {
+    if (pendingTransactions.isEmpty()) return
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f))
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(
+                        imageVector = AppIcons.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "Needs Your Review (${pendingTransactions.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.error
+                ) {
+                    Text(
+                        text = "ACTION REQUIRED",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Text(
+                text = "FinTrack detected card spending from SMS alerts. Verify or reject each transaction before account liabilities update.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            pendingTransactions.take(3).forEach { item ->
+                val txn = item.transaction
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = txn.merchant,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                text = txn.reviewReason ?: "Unconfirmed card debit",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "₹${String.format(Locale.getDefault(), "%,.2f", txn.amount)}",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.error
+                            )
+
+                            Button(
+                                onClick = { onReviewClick(item) },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                modifier = Modifier.height(28.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            ) {
+                                Text("Review", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (pendingTransactions.size > 3) {
+                Text(
+                    text = "+ ${pendingTransactions.size - 3} more items pending review",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun CreditCardsSection(
+    cards: List<Account>,
+    onCardClick: (Account) -> Unit,
+    onMarkBillPaid: (Account) -> Unit
+) {
+    if (cards.isEmpty()) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(
+                    imageVector = AppIcons.CreditCard,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    text = "Credit Cards",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                text = "${cards.size} card${if (cards.size > 1) "s" else ""}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        cards.forEach { card ->
+            val limit = if (card.creditLimit > 0) card.creditLimit else 1.0
+            val spent = card.currentBalance.coerceAtLeast(0.0)
+            val available = card.availableCredit ?: maxOf(0.0, limit - spent)
+            val progress = (spent / limit).toFloat().coerceIn(0f, 1f)
+
+            val (badgeText, badgeBg, badgeFg) = when (card.billStatus) {
+                BillStatus.PAID -> Triple("PAID", Color(0xFF10B981).copy(alpha = 0.15f), Color(0xFF059669))
+                BillStatus.DUE -> Triple("BILL DUE", Color(0xFFEF4444).copy(alpha = 0.15f), Color(0xFFDC2626))
+                BillStatus.PAYMENT_DETECTED -> Triple("PAYMENT DETECTED", Color(0xFF3B82F6).copy(alpha = 0.15f), Color(0xFF2563EB))
+                BillStatus.UPCOMING -> Triple("UPCOMING DUE", Color(0xFFF59E0B).copy(alpha = 0.15f), Color(0xFFD97706))
+                BillStatus.OVERDUE -> Triple("OVERDUE", Color(0xFFDC2626).copy(alpha = 0.2f), Color(0xFFB91C1C))
+                BillStatus.GENERATED -> Triple("STATEMENT READY", Color(0xFF8B5CF6).copy(alpha = 0.15f), Color(0xFF7C3AED))
+                else -> Triple("ACTIVE", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onCardClick(card) },
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Top Row: Name, Last4 & Status Badge
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = card.name,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "${card.bankName} ••${card.accountNumberLast4}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = badgeBg
+                        ) {
+                            Text(
+                                text = badgeText,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = badgeFg,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    // Progress Bar
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(CircleShape),
+                        color = if (progress > 0.8f) Color(0xFFEF4444) else MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+
+                    // Limits row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text(
+                                text = "Spent / Outstanding",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "₹${String.format(Locale.getDefault(), "%,.2f", spent)}",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (spent > 0) Color(0xFFEF4444) else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "Available Credit",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "₹${String.format(Locale.getDefault(), "%,.2f", available)}",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF10B981)
+                            )
+                        }
+                    }
+
+                    // Due Info and Mark Bill Paid Action
+                    val totalDue = card.totalDue ?: 0.0
+                    val hasDue = totalDue > 0.0 || card.paymentDueDate != null
+                    if (hasDue) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.background.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    if (totalDue > 0.0) {
+                                        Text(
+                                            text = "Due: ₹${String.format(Locale.getDefault(), "%,.2f", totalDue)}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                    if (!card.paymentDueDate.isNullOrBlank()) {
+                                        Text(
+                                            text = "Pay by ${card.paymentDueDate}",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                Button(
+                                    onClick = { onMarkBillPaid(card) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(32.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
+                                ) {
+                                    Text("Mark Bill Paid", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

@@ -63,6 +63,7 @@ fun AccountsScreen(
     onAddAccount: (name: String, bankName: String, type: AccountType, subType: BankAccountType, last4: String, currentBalance: Double, creditLimit: Double, stmtDate: String?, dueDate: String?) -> Unit,
     onEditAccount: (Account, name: String, bankName: String, type: AccountType, subType: BankAccountType, last4: String, currentBalance: Double, creditLimit: Double, stmtDate: String?, dueDate: String?) -> Unit,
     onDeleteAccount: (Account) -> Unit,
+    onBackClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var showAddAccountDialog by remember { mutableStateOf(false) }
@@ -85,17 +86,28 @@ fun AccountsScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                Text(
-                    text = "Accounts & Cards",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Bank accounts, credit cards, and local ledger balances",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Row(
+                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (onBackClick != null) {
+                    IconButton(onClick = onBackClick) {
+                        Icon(AppIcons.ArrowBack, contentDescription = "Back")
+                    }
+                }
+                Column {
+                    Text(
+                        text = "Accounts & Cards",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Bank accounts, credit cards, and local ledger balances",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             OutlinedButton(

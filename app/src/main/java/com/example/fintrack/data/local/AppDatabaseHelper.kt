@@ -28,6 +28,10 @@ import com.example.fintrack.data.model.User
 import com.example.fintrack.data.model.VerificationEvent
 import com.example.fintrack.data.model.VerificationEventType
 import com.example.fintrack.data.model.VerificationStatus
+import com.example.fintrack.data.model.MessageRule
+import com.example.fintrack.data.model.MessageRuleAction
+import com.example.fintrack.data.model.MessageRuleStatus
+import com.example.fintrack.data.model.TransactionStatus
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -47,7 +51,7 @@ class AppDatabaseHelper(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "fintrack_secure.db"
-        const val DATABASE_VERSION = 4
+        const val DATABASE_VERSION = 5
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -64,6 +68,7 @@ class AppDatabaseHelper(context: Context) :
         const val TABLE_CATEGORIES = "categories"
         const val TABLE_TRANSACTIONS = "transactions"
         const val TABLE_MERCHANT_RULES = "merchant_rules"
+        const val TABLE_MESSAGE_RULES = "message_rules"
         const val TABLE_RECONCILIATION_LOGS = "reconciliation_logs"
         const val TABLE_IMPORTED_SMS = "imported_sms"
         const val TABLE_ACCOUNT_ALIASES = "account_aliases"
@@ -132,15 +137,27 @@ class AppDatabaseHelper(context: Context) :
         const val COL_TXN_NOTE = "note" // Encrypted
         const val COL_TXN_NEEDS_REVIEW = "needs_review"
         const val COL_TXN_REVIEW_REASON = "review_reason"
+        const val COL_TXN_STATUS = "status" // CONFIRMED, PENDING_REVIEW, REJECTED, DISMISSED
         const val COL_TXN_FINGERPRINT = "fingerprint"
         const val COL_TXN_LINKED_TXN_ID = "linked_transaction_id"
         const val COL_TXN_CREATED = "created_at"
 
-        // Rules Columns
+        // Rules Columns (Merchant)
         const val COL_RULE_ID = "id"
         const val COL_RULE_KEYWORD = "merchant_keyword"
         const val COL_RULE_CAT_ID = "category_id"
         const val COL_RULE_CONFIRMED = "user_confirmed"
+
+        // Message Rules Columns (Learned False / Irrelevant Message Filters)
+        const val COL_MR_ID = "id"
+        const val COL_MR_USER_ID = "user_id"
+        const val COL_MR_SENDER_PATTERN = "sender_pattern"
+        const val COL_MR_BODY_PATTERN = "body_pattern"
+        const val COL_MR_CLASSIFICATION = "classification"
+        const val COL_MR_ACTION = "action"
+        const val COL_MR_STATUS = "status"
+        const val COL_MR_DESC = "description"
+        const val COL_MR_CREATED = "created_at"
 
         // Reconciliation Columns
         const val COL_REC_ID = "id"
@@ -295,6 +312,7 @@ class AppDatabaseHelper(context: Context) :
                 $COL_TXN_NOTE TEXT,
                 $COL_TXN_NEEDS_REVIEW INTEGER NOT NULL DEFAULT 0,
                 $COL_TXN_REVIEW_REASON TEXT,
+                $COL_TXN_STATUS TEXT NOT NULL DEFAULT 'CONFIRMED',
                 $COL_TXN_FINGERPRINT TEXT,
                 $COL_TXN_LINKED_TXN_ID TEXT,
                 $COL_TXN_CREATED INTEGER NOT NULL
@@ -307,6 +325,7 @@ class AppDatabaseHelper(context: Context) :
         db.execSQL("CREATE INDEX idx_txn_source ON $TABLE_TRANSACTIONS ($COL_TXN_SOURCE_ACC_ID)")
         db.execSQL("CREATE INDEX idx_txn_dest ON $TABLE_TRANSACTIONS ($COL_TXN_DEST_ACC_ID)")
         db.execSQL("CREATE INDEX idx_txn_kind ON $TABLE_TRANSACTIONS ($COL_TXN_KIND)")
+        db.execSQL("CREATE INDEX idx_txn_status ON $TABLE_TRANSACTIONS ($COL_TXN_STATUS)")
         db.execSQL("CREATE INDEX idx_txn_fingerprint ON $TABLE_TRANSACTIONS ($COL_TXN_FINGERPRINT)")
         db.execSQL("CREATE INDEX idx_txn_ref ON $TABLE_TRANSACTIONS ($COL_TXN_REF_NO)")
 
@@ -321,6 +340,24 @@ class AppDatabaseHelper(context: Context) :
             )
             """.trimIndent()
         )
+
+        // Message classification rules (User-learned rejections / filters)
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS $TABLE_MESSAGE_RULES (
+                $COL_MR_ID TEXT PRIMARY KEY,
+                $COL_MR_USER_ID TEXT NOT NULL DEFAULT 'user_default',
+                $COL_MR_SENDER_PATTERN TEXT NOT NULL,
+                $COL_MR_BODY_PATTERN TEXT NOT NULL,
+                $COL_MR_CLASSIFICATION TEXT NOT NULL,
+                $COL_MR_ACTION TEXT NOT NULL DEFAULT 'IGNORE',
+                $COL_MR_STATUS TEXT NOT NULL DEFAULT 'ACTIVE',
+                $COL_MR_DESC TEXT,
+                $COL_MR_CREATED INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_mr_user ON $TABLE_MESSAGE_RULES ($COL_MR_USER_ID, $COL_MR_STATUS)")
 
         // Reconciliation logs
         db.execSQL(
@@ -426,7 +463,7 @@ class AppDatabaseHelper(context: Context) :
         try {
             if (oldVersion < 2) {
                 addColumnIfNotExists(db, TABLE_ACCOUNTS, COL_ACC_TYPE, "TEXT NOT NULL DEFAULT 'BANK'")
-                val encryptedZero = SecurityManager.encryptDouble(0.0) ?: "0.0"
+                val encryptedZero = SecurityManager.encryptDouble(0.0)
                 addColumnIfNotExists(db, TABLE_ACCOUNTS, COL_ACC_CREDIT_LIMIT, "TEXT NOT NULL DEFAULT '$encryptedZero'")
             }
 
@@ -588,6 +625,29 @@ class AppDatabaseHelper(context: Context) :
                 seedDefaultUser(db)
             }
 
+            if (oldVersion < 5) {
+                // 1. Add status column to transactions
+                addColumnIfNotExists(db, TABLE_TRANSACTIONS, COL_TXN_STATUS, "TEXT NOT NULL DEFAULT 'CONFIRMED'")
+
+                // 2. Create Message Rules Table
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS $TABLE_MESSAGE_RULES (
+                        $COL_MR_ID TEXT PRIMARY KEY,
+                        $COL_MR_USER_ID TEXT NOT NULL DEFAULT 'user_default',
+                        $COL_MR_SENDER_PATTERN TEXT NOT NULL,
+                        $COL_MR_BODY_PATTERN TEXT NOT NULL,
+                        $COL_MR_CLASSIFICATION TEXT NOT NULL,
+                        $COL_MR_ACTION TEXT NOT NULL DEFAULT 'IGNORE',
+                        $COL_MR_STATUS TEXT NOT NULL DEFAULT 'ACTIVE',
+                        $COL_MR_DESC TEXT,
+                        $COL_MR_CREATED INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_mr_user ON $TABLE_MESSAGE_RULES ($COL_MR_USER_ID, $COL_MR_STATUS)")
+            }
+
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -746,7 +806,7 @@ class AppDatabaseHelper(context: Context) :
         var net = 0.0
         val cursor = db.query(
             TABLE_TRANSACTIONS,
-            arrayOf(COL_TXN_AMOUNT, COL_TXN_TYPE, COL_TXN_KIND, COL_TXN_SOURCE_ACC_ID, COL_TXN_DEST_ACC_ID, COL_TXN_ACC_ID),
+            null,
             "$COL_TXN_ACC_ID = ? OR $COL_TXN_SOURCE_ACC_ID = ? OR $COL_TXN_DEST_ACC_ID = ?",
             arrayOf(accountId, accountId, accountId),
             null,
@@ -760,12 +820,31 @@ class AppDatabaseHelper(context: Context) :
             val sourceIdx = c.getColumnIndexOrThrow(COL_TXN_SOURCE_ACC_ID)
             val destIdx = c.getColumnIndexOrThrow(COL_TXN_DEST_ACC_ID)
             val accIdx = c.getColumnIndexOrThrow(COL_TXN_ACC_ID)
+            val statusIdx = c.getColumnIndex(COL_TXN_STATUS)
+            val reviewIdx = c.getColumnIndex(COL_TXN_NEEDS_REVIEW)
 
             while (c.moveToNext()) {
+                val reviewVal = if (reviewIdx != -1) c.getInt(reviewIdx) else 0
+                val statusStr = if (statusIdx != -1) c.getString(statusIdx) else null
+                val status = TransactionStatus.fromString(statusStr)
+
+                // CRITICAL INVARIANT: Only CONFIRMED transactions that do not need review affect ledger balances!
+                if (reviewVal == 1 || status == TransactionStatus.PENDING_REVIEW || status == TransactionStatus.REJECTED || status == TransactionStatus.DISMISSED) {
+                    continue
+                }
+
                 val encryptedAmount = c.getString(encAmountIdx)
                 val type = c.getString(typeIdx)
                 val kindStr = c.getString(kindIdx)
                 val kind = TransactionKind.fromString(kindStr)
+
+                // Informational notices are never ledger debits/credits
+                if (kind == TransactionKind.CARD_BILL_DUE || kind == TransactionKind.CARD_BILL_GENERATED ||
+                    kind == TransactionKind.CARD_BILL_OVERDUE || kind == TransactionKind.PROMOTIONAL ||
+                    kind == TransactionKind.OTP) {
+                    continue
+                }
+
                 val sourceAcc = c.getString(sourceIdx)
                 val destAcc = c.getString(destIdx)
                 val primaryAcc = c.getString(accIdx)
@@ -1304,6 +1383,7 @@ class AppDatabaseHelper(context: Context) :
             put(COL_TXN_NOTE, SecurityManager.encrypt(transaction.note))
             put(COL_TXN_NEEDS_REVIEW, if (transaction.needsReview) 1 else 0)
             put(COL_TXN_REVIEW_REASON, transaction.reviewReason)
+            put(COL_TXN_STATUS, transaction.status.name)
             put(COL_TXN_FINGERPRINT, transaction.fingerprint)
             put(COL_TXN_LINKED_TXN_ID, transaction.linkedTransactionId)
             put(COL_TXN_CREATED, transaction.createdAt)
@@ -1464,19 +1544,394 @@ class AppDatabaseHelper(context: Context) :
         return rows > 0
     }
 
-    fun getTransactionsWithDetails(limit: Int = 100): List<TransactionWithDetails> {
+    fun getTransactionById(transactionId: String): Transaction? {
         val db = readableDatabase
-        val accountsMap = getAccounts().associateBy { it.id }
+        val cursor = db.query(TABLE_TRANSACTIONS, null, "$COL_TXN_ID = ?", arrayOf(transactionId), null, null, null, "1")
+        cursor.use { c ->
+            if (c.moveToNext()) {
+                return parseTransactionCursor(c)
+            }
+        }
+        return null
+    }
+
+    fun getPendingReviewTransactions(userId: String = User.DEFAULT_USER_ID): List<TransactionWithDetails> {
+        val db = readableDatabase
+        val accountsMap = getAccounts(userId).associateBy { it.id }
         val categoriesMap = getCategories().associateBy { it.id }
         val defaultCategory = categoriesMap["cat_other"] ?: Category.DEFAULT_CATEGORIES.last()
-        val defaultAccount = accountsMap.values.firstOrNull { it.isPrimary } ?: accountsMap.values.firstOrNull() ?: Account(name = "Account", bankName = "Bank")
+        val defaultAccount = accountsMap.values.firstOrNull { it.isPrimary } ?: accountsMap.values.firstOrNull() ?: Account(name = "Unknown Account", bankName = "Unknown")
 
         val list = mutableListOf<TransactionWithDetails>()
         val cursor = db.query(
             TABLE_TRANSACTIONS,
             null,
+            "$COL_TXN_USER_ID = ? AND ($COL_TXN_NEEDS_REVIEW = 1 OR $COL_TXN_STATUS = ?)",
+            arrayOf(userId, TransactionStatus.PENDING_REVIEW.name),
+            null, null,
+            "$COL_TXN_TIMESTAMP DESC",
+            "50"
+        )
+        cursor.use { c ->
+            while (c.moveToNext()) {
+                val txn = parseTransactionCursor(c)
+                val account = accountsMap[txn.accountId] ?: defaultAccount
+                val category = categoriesMap[txn.categoryId] ?: defaultCategory
+                val source = txn.sourceAccountId?.let { accountsMap[it] }
+                val dest = txn.destinationAccountId?.let { accountsMap[it] }
+
+                list.add(TransactionWithDetails(txn, account, category, source, dest))
+            }
+        }
+        return list
+    }
+
+    fun confirmCreditCardTransaction(
+        transactionId: String,
+        creditCardId: String,
+        userId: String = User.DEFAULT_USER_ID
+    ): Boolean {
+        val db = writableDatabase
+        db.beginTransaction()
+        return try {
+            val txn = getTransactionById(transactionId) ?: return false
+            val card = getAccountById(creditCardId, userId) ?: return false
+
+            val values = ContentValues().apply {
+                put(COL_TXN_ACC_ID, creditCardId)
+                put(COL_TXN_SOURCE_ACC_ID, creditCardId)
+                put(COL_TXN_KIND, if (txn.direction == TransactionDirection.DEBIT) TransactionKind.CARD_PURCHASE.name else TransactionKind.REFUND.name)
+                put(COL_TXN_NEEDS_REVIEW, 0)
+                putNull(COL_TXN_REVIEW_REASON)
+                put(COL_TXN_STATUS, TransactionStatus.CONFIRMED.name)
+            }
+            db.update(TABLE_TRANSACTIONS, values, "$COL_TXN_ID = ?", arrayOf(transactionId))
+
+            // Resolve any linked verification events
+            val verifValues = ContentValues().apply {
+                put(COL_VERIF_STATUS, VerificationStatus.CONFIRMED.name)
+                put(COL_VERIF_RESOLVED_AT, System.currentTimeMillis())
+                put(COL_VERIF_ACC_ID, creditCardId)
+            }
+            db.update(TABLE_VERIFICATION_EVENTS, verifValues, "$COL_VERIF_TXN_ID = ? AND $COL_VERIF_USER_ID = ?", arrayOf(transactionId, userId))
+
+            // Create immutable audit log
+            val audit = AuditLog(
+                id = UUID.randomUUID().toString(),
+                userId = userId,
+                entityType = "TRANSACTION",
+                entityId = transactionId,
+                action = "CONFIRM_CREDIT_CARD_TXN",
+                oldState = "PENDING_REVIEW",
+                newState = "CONFIRMED",
+                source = "User Review",
+                details = "Confirmed transaction of ₹${"%.2f".format(txn.amount)} assigned to ${card.name} (ending ••${card.accountNumberLast4})"
+            )
+            insertAuditLogInternal(db, audit)
+
+            db.setTransactionSuccessful()
+            notifyDataChanged()
+            true
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun confirmCreditCardPayment(
+        transactionId: String,
+        creditCardId: String,
+        payingBankAccountId: String?,
+        amount: Double,
+        userId: String = User.DEFAULT_USER_ID
+    ): Boolean {
+        val db = writableDatabase
+        db.beginTransaction()
+        return try {
+            val txn = getTransactionById(transactionId) ?: return false
+            val card = getAccountById(creditCardId, userId) ?: return false
+
+            val values = ContentValues().apply {
+                put(COL_TXN_ACC_ID, creditCardId)
+                put(COL_TXN_DEST_ACC_ID, creditCardId)
+                put(COL_TXN_SOURCE_ACC_ID, payingBankAccountId ?: creditCardId)
+                put(COL_TXN_KIND, TransactionKind.CARD_PAYMENT.name)
+                put(COL_TXN_NEEDS_REVIEW, 0)
+                putNull(COL_TXN_REVIEW_REASON)
+                put(COL_TXN_STATUS, TransactionStatus.CONFIRMED.name)
+            }
+            db.update(TABLE_TRANSACTIONS, values, "$COL_TXN_ID = ?", arrayOf(transactionId))
+
+            // Intelligently recalculate credit card liabilities and restore available limit
+            val currentBal = card.currentBalance
+            val newOutstanding = maxOf(0.0, currentBal - amount)
+            val currentAvail = card.availableCredit ?: maxOf(0.0, card.creditLimit - currentBal)
+            val newAvailable = minOf(card.creditLimit, currentAvail + amount)
+            val currentDue = card.totalDue ?: 0.0
+            val newTotalDue = maxOf(0.0, currentDue - amount)
+
+            val updatedCard = card.copy(
+                availableCredit = newAvailable,
+                totalDue = newTotalDue,
+                billStatus = BillStatus.PAID
+            )
+            updateAccount(updatedCard, targetCurrentBalance = newOutstanding)
+
+            // Resolve any linked verification events
+            val verifValues = ContentValues().apply {
+                put(COL_VERIF_STATUS, VerificationStatus.CONFIRMED.name)
+                put(COL_VERIF_RESOLVED_AT, System.currentTimeMillis())
+                put(COL_VERIF_ACC_ID, creditCardId)
+            }
+            db.update(TABLE_VERIFICATION_EVENTS, verifValues, "$COL_VERIF_TXN_ID = ? AND $COL_VERIF_USER_ID = ?", arrayOf(transactionId, userId))
+
+            val audit = AuditLog(
+                id = UUID.randomUUID().toString(),
+                userId = userId,
+                entityType = "TRANSACTION",
+                entityId = transactionId,
+                action = "CONFIRM_BILL_PAYMENT",
+                oldState = card.billStatus.name,
+                newState = BillStatus.PAID.name,
+                source = "User Review",
+                details = "Confirmed payment of ₹${"%.2f".format(amount)} towards ${card.name}. Restored available limit to ₹${"%.2f".format(newAvailable)}"
+            )
+            insertAuditLogInternal(db, audit)
+
+            db.setTransactionSuccessful()
+            notifyDataChanged()
+            true
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun rejectTransaction(
+        transactionId: String,
+        reason: String,
+        learnRule: Boolean = false,
+        userId: String = User.DEFAULT_USER_ID
+    ): Boolean {
+        val db = writableDatabase
+        db.beginTransaction()
+        return try {
+            val txn = getTransactionById(transactionId) ?: return false
+
+            val values = ContentValues().apply {
+                put(COL_TXN_NEEDS_REVIEW, 0)
+                put(COL_TXN_STATUS, TransactionStatus.REJECTED.name)
+                put(COL_TXN_REVIEW_REASON, reason)
+            }
+            val rows = db.update(TABLE_TRANSACTIONS, values, "$COL_TXN_ID = ?", arrayOf(transactionId))
+
+            // If user opted to learn a safe rule from this rejection
+            if (learnRule && !txn.smsSender.isNullOrBlank()) {
+                val cleanSender = txn.smsSender.trim()
+                val snippet = if (!txn.rawSmsBody.isNullOrBlank()) {
+                    extractSafeFilterSnippet(txn.rawSmsBody)
+                } else txn.merchant
+
+                val rule = MessageRule(
+                    id = UUID.randomUUID().toString(),
+                    userId = userId,
+                    senderPattern = cleanSender,
+                    bodyPattern = snippet,
+                    classification = "IRRELEVANT",
+                    action = MessageRuleAction.IGNORE,
+                    status = MessageRuleStatus.ACTIVE,
+                    description = "Learned filter from rejected message ($cleanSender): $snippet",
+                    createdAt = System.currentTimeMillis()
+                )
+                insertMessageRuleInternal(db, rule)
+            }
+
+            // Resolve any linked verification events
+            val verifValues = ContentValues().apply {
+                put(COL_VERIF_STATUS, VerificationStatus.REJECTED.name)
+                put(COL_VERIF_RESOLVED_AT, System.currentTimeMillis())
+            }
+            db.update(TABLE_VERIFICATION_EVENTS, verifValues, "$COL_VERIF_TXN_ID = ? AND $COL_VERIF_USER_ID = ?", arrayOf(transactionId, userId))
+
+            val audit = AuditLog(
+                id = UUID.randomUUID().toString(),
+                userId = userId,
+                entityType = "TRANSACTION",
+                entityId = transactionId,
+                action = "REJECT_TRANSACTION",
+                oldState = txn.status.name,
+                newState = TransactionStatus.REJECTED.name,
+                source = "User Rejection",
+                details = "Transaction marked as not relevant: $reason"
+            )
+            insertAuditLogInternal(db, audit)
+
+            db.setTransactionSuccessful()
+            notifyDataChanged()
+            rows > 0
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun reverseTransaction(
+        transactionId: String,
+        reason: String,
+        userId: String = User.DEFAULT_USER_ID
+    ): Boolean {
+        val db = writableDatabase
+        db.beginTransaction()
+        return try {
+            val txn = getTransactionById(transactionId) ?: return false
+            val oldAccount = getAccountById(txn.accountId, userId)
+
+            val values = ContentValues().apply {
+                put(COL_TXN_STATUS, TransactionStatus.REJECTED.name)
+                put(COL_TXN_REVIEW_REASON, "Reversed: $reason")
+            }
+            val rows = db.update(TABLE_TRANSACTIONS, values, "$COL_TXN_ID = ?", arrayOf(transactionId))
+
+            // If it was a credit card bill payment, revert card bill status to DUE
+            if (txn.kind == TransactionKind.CARD_PAYMENT && oldAccount != null && oldAccount.isCreditCard) {
+                val updatedCard = oldAccount.copy(
+                    billStatus = BillStatus.DUE,
+                    totalDue = (oldAccount.totalDue ?: 0.0) + txn.amount
+                )
+                updateAccount(updatedCard)
+            }
+
+            val audit = AuditLog(
+                id = UUID.randomUUID().toString(),
+                userId = userId,
+                entityType = "TRANSACTION",
+                entityId = transactionId,
+                action = "REVERSE_TRANSACTION",
+                oldState = txn.status.name,
+                newState = TransactionStatus.REJECTED.name,
+                source = "User Action",
+                details = "Reversed transaction of ₹${"%.2f".format(txn.amount)}: $reason. Ledger recalculated."
+            )
+            insertAuditLogInternal(db, audit)
+
+            db.setTransactionSuccessful()
+            notifyDataChanged()
+            rows > 0
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    // Message Rules Operations (Learned Filters)
+    fun insertMessageRule(rule: MessageRule): Boolean {
+        val db = writableDatabase
+        insertMessageRuleInternal(db, rule)
+        notifyDataChanged()
+        return true
+    }
+
+    private fun insertMessageRuleInternal(db: SQLiteDatabase, rule: MessageRule) {
+        val values = ContentValues().apply {
+            put(COL_MR_ID, rule.id)
+            put(COL_MR_USER_ID, rule.userId)
+            put(COL_MR_SENDER_PATTERN, rule.senderPattern)
+            put(COL_MR_BODY_PATTERN, rule.bodyPattern)
+            put(COL_MR_CLASSIFICATION, rule.classification)
+            put(COL_MR_ACTION, rule.action.name)
+            put(COL_MR_STATUS, rule.status.name)
+            put(COL_MR_DESC, rule.description)
+            put(COL_MR_CREATED, rule.createdAt)
+        }
+        db.insertWithOnConflict(TABLE_MESSAGE_RULES, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    fun getMessageRules(userId: String = User.DEFAULT_USER_ID): List<MessageRule> {
+        val db = readableDatabase
+        val list = mutableListOf<MessageRule>()
+        val cursor = db.query(TABLE_MESSAGE_RULES, null, "$COL_MR_USER_ID = ?", arrayOf(userId), null, null, "$COL_MR_CREATED DESC")
+        cursor.use { c ->
+            while (c.moveToNext()) {
+                val id = c.getString(c.getColumnIndexOrThrow(COL_MR_ID))
+                val rowUserId = c.getString(c.getColumnIndexOrThrow(COL_MR_USER_ID))
+                val sender = c.getString(c.getColumnIndexOrThrow(COL_MR_SENDER_PATTERN))
+                val body = c.getString(c.getColumnIndexOrThrow(COL_MR_BODY_PATTERN))
+                val classification = c.getString(c.getColumnIndexOrThrow(COL_MR_CLASSIFICATION))
+                val actionStr = c.getString(c.getColumnIndexOrThrow(COL_MR_ACTION))
+                val action = try { MessageRuleAction.valueOf(actionStr) } catch (_: Exception) { MessageRuleAction.IGNORE }
+                val statusStr = c.getString(c.getColumnIndexOrThrow(COL_MR_STATUS))
+                val status = try { MessageRuleStatus.valueOf(statusStr) } catch (_: Exception) { MessageRuleStatus.ACTIVE }
+                val desc = c.getString(c.getColumnIndexOrThrow(COL_MR_DESC)) ?: ""
+                val created = c.getLong(c.getColumnIndexOrThrow(COL_MR_CREATED))
+                list.add(MessageRule(id, rowUserId, sender, body, classification, action, status, desc, created))
+            }
+        }
+        return list
+    }
+
+    fun deleteMessageRule(ruleId: String): Boolean {
+        val db = writableDatabase
+        val rows = db.delete(TABLE_MESSAGE_RULES, "$COL_MR_ID = ?", arrayOf(ruleId))
+        notifyDataChanged()
+        return rows > 0
+    }
+
+    fun findMatchingMessageRule(sender: String?, body: String, userId: String = User.DEFAULT_USER_ID): MessageRule? {
+        val rules = getMessageRules(userId).filter { it.status == MessageRuleStatus.ACTIVE }
+        val s = (sender ?: "").lowercase().trim()
+        val b = body.lowercase().trim()
+
+        for (rule in rules) {
+            val senderMatch = rule.senderPattern.isNotBlank() && s.contains(rule.senderPattern.lowercase().trim())
+            val bodyMatch = rule.bodyPattern.isNotBlank() && b.contains(rule.bodyPattern.lowercase().trim())
+            if (senderMatch && (rule.bodyPattern.isBlank() || bodyMatch)) {
+                return rule
+            }
+        }
+        return null
+    }
+
+    private fun extractSafeFilterSnippet(rawBody: String): String {
+        // Extract safe distinct words, excluding amounts and dates
+        val clean = rawBody.replace(Regex("""(?i)\b(?:rs\.?|inr|\d+[\d,.]*)\b"""), "")
+            .replace(Regex("""[^\w\s]"""), " ")
+            .trim()
+        val words = clean.split(Regex("""\s+""")).filter { it.length > 3 }.take(3)
+        return words.joinToString(" ")
+    }
+
+    fun getTransactionsWithDetails(
+        limit: Int = 100,
+        userId: String = User.DEFAULT_USER_ID,
+        includePending: Boolean = false,
+        includeRejected: Boolean = false
+    ): List<TransactionWithDetails> {
+        val db = readableDatabase
+        val accountsMap = getAccounts(userId).associateBy { it.id }
+        val categoriesMap = getCategories().associateBy { it.id }
+        val defaultCategory = categoriesMap["cat_other"] ?: Category.DEFAULT_CATEGORIES.last()
+        val defaultAccount = accountsMap.values.firstOrNull { it.isPrimary } ?: accountsMap.values.firstOrNull() ?: Account(name = "Account", bankName = "Bank")
+
+        val selectionList = mutableListOf<String>()
+        val argsList = mutableListOf<String>()
+
+        selectionList.add("$COL_TXN_USER_ID = ?")
+        argsList.add(userId)
+
+        if (!includePending) {
+            selectionList.add("($COL_TXN_NEEDS_REVIEW = 0 AND ($COL_TXN_STATUS != ? OR $COL_TXN_STATUS IS NULL))")
+            argsList.add(TransactionStatus.PENDING_REVIEW.name)
+        }
+        if (!includeRejected) {
+            selectionList.add("($COL_TXN_STATUS != ? AND $COL_TXN_STATUS != ? OR $COL_TXN_STATUS IS NULL)")
+            argsList.add(TransactionStatus.REJECTED.name)
+            argsList.add(TransactionStatus.DISMISSED.name)
+        }
+
+        val selection = selectionList.joinToString(" AND ")
+
+        val list = mutableListOf<TransactionWithDetails>()
+        val cursor = db.query(
+            TABLE_TRANSACTIONS,
             null,
-            null,
+            selection,
+            argsList.toTypedArray(),
             null,
             null,
             "$COL_TXN_TIMESTAMP DESC",
@@ -1545,6 +2000,12 @@ class AppDatabaseHelper(context: Context) :
         val reasonIdx = c.getColumnIndex(COL_TXN_REVIEW_REASON)
         val reviewReason = if (reasonIdx != -1) c.getString(reasonIdx) else null
 
+        val statusIdx = c.getColumnIndex(COL_TXN_STATUS)
+        val statusStr = if (statusIdx != -1) c.getString(statusIdx) else null
+        val status = if (statusStr != null) TransactionStatus.fromString(statusStr) else {
+            if (needsReview) TransactionStatus.PENDING_REVIEW else TransactionStatus.CONFIRMED
+        }
+
         val fpIdx = c.getColumnIndex(COL_TXN_FINGERPRINT)
         val fingerprint = if (fpIdx != -1) c.getString(fpIdx) else null
 
@@ -1563,6 +2024,7 @@ class AppDatabaseHelper(context: Context) :
             amount = amount,
             direction = direction,
             kind = kind,
+            status = status,
             timestamp = timestamp,
             merchant = merchant,
             rawSmsBody = rawSms,

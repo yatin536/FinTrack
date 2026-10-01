@@ -56,22 +56,20 @@ import com.example.fintrack.ui.components.AdjustBalanceDialog
 import com.example.fintrack.ui.components.AppIcons
 import com.example.fintrack.ui.components.BillPaidDialog
 import com.example.fintrack.ui.components.ChangeCategoryDialog
+import com.example.fintrack.ui.components.TransactionReviewSheet
 import com.example.fintrack.ui.dashboard.DashboardScreen
 import com.example.fintrack.ui.intelligence.IntelligenceCenterScreen
 import com.example.fintrack.ui.profile.ProfileSettingsScreen
 import com.example.fintrack.ui.splash.SplashScreen
 import com.example.fintrack.ui.transactions.TransactionsScreen
-import com.example.fintrack.ui.verification.VerificationScreen
 import kotlinx.coroutines.launch
 import java.util.UUID
 
 enum class AppTab {
-    DASHBOARD,
-    TRANSACTIONS,
-    ACCOUNTS,
-    VERIFICATION,
-    INTELLIGENCE,
-    SETTINGS
+    HOME,
+    ACTIVITY,
+    INSIGHTS,
+    PROFILE
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -88,16 +86,18 @@ fun MainAppShell(
 
     var showSplash by remember { mutableStateOf(true) }
     var isAuthenticated by remember { mutableStateOf(!pinManager.isPinSet) }
-    var currentTab by remember { mutableStateOf(AppTab.DASHBOARD) }
+    var currentTab by remember { mutableStateOf(AppTab.HOME) }
     var selectedPeriod by remember { mutableStateOf(TimePeriod.MONTHLY) }
 
     // Screen Navigation States
     var selectedCreditCard by remember { mutableStateOf<Account?>(null) }
     var payingCreditCard by remember { mutableStateOf<Account?>(null) }
+    var showAccountsScreen by remember { mutableStateOf(false) }
 
     // Active Dialog States
     var adjustingAccount by remember { mutableStateOf<Account?>(null) }
     var editingCategoryTxn by remember { mutableStateOf<TransactionWithDetails?>(null) }
+    var reviewingTxn by remember { mutableStateOf<TransactionWithDetails?>(null) }
     var showAddTxnDialog by remember { mutableStateOf(false) }
 
     // Multi-User active key for refreshing
@@ -110,6 +110,8 @@ fun MainAppShell(
     val categories by repository.getCategories().collectAsState(initial = emptyList())
     val verificationEvents by repository.getVerificationEvents().collectAsState(initial = emptyList())
     val insights by repository.getFinancialInsights().collectAsState(initial = emptyList())
+    val pendingReviewTxns by repository.getPendingReviewTransactions().collectAsState(initial = emptyList())
+    val creditCards = remember(accounts) { accounts.filter { it.isCreditCard } }
 
     val pendingVerificationCount = remember(verificationEvents) {
         verificationEvents.count { it.status == VerificationStatus.PENDING }
@@ -179,73 +181,61 @@ fun MainAppShell(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     ) {
                         NavigationBarItem(
-                            selected = currentTab == AppTab.DASHBOARD && selectedCreditCard == null,
+                            selected = currentTab == AppTab.HOME && selectedCreditCard == null && !showAccountsScreen,
                             onClick = {
-                                currentTab = AppTab.DASHBOARD
+                                currentTab = AppTab.HOME
                                 selectedCreditCard = null
+                                showAccountsScreen = false
                             },
-                            icon = { Icon(AppIcons.Dashboard, contentDescription = "Dashboard") },
+                            icon = {
+                                if (pendingReviewTxns.isNotEmpty()) {
+                                    BadgedBox(
+                                        badge = {
+                                            Badge { Text("${pendingReviewTxns.size}") }
+                                        }
+                                    ) {
+                                        Icon(AppIcons.Dashboard, contentDescription = "Home")
+                                    }
+                                } else {
+                                    Icon(AppIcons.Dashboard, contentDescription = "Home")
+                                }
+                            },
                             label = { Text("Home", fontSize = 11.sp) }
                         )
                         NavigationBarItem(
-                            selected = currentTab == AppTab.TRANSACTIONS && selectedCreditCard == null,
+                            selected = currentTab == AppTab.ACTIVITY && selectedCreditCard == null && !showAccountsScreen,
                             onClick = {
-                                currentTab = AppTab.TRANSACTIONS
+                                currentTab = AppTab.ACTIVITY
                                 selectedCreditCard = null
+                                showAccountsScreen = false
                             },
-                            icon = { Icon(AppIcons.Activity, contentDescription = "Transactions") },
+                            icon = { Icon(AppIcons.Activity, contentDescription = "Activity") },
                             label = { Text("Activity", fontSize = 11.sp) }
                         )
                         NavigationBarItem(
-                            selected = currentTab == AppTab.ACCOUNTS && selectedCreditCard == null,
+                            selected = currentTab == AppTab.INSIGHTS && selectedCreditCard == null && !showAccountsScreen,
                             onClick = {
-                                currentTab = AppTab.ACCOUNTS
+                                currentTab = AppTab.INSIGHTS
                                 selectedCreditCard = null
+                                showAccountsScreen = false
                             },
-                            icon = { Icon(AppIcons.Bank, contentDescription = "Accounts") },
-                            label = { Text("Accounts", fontSize = 11.sp) }
-                        )
-                        NavigationBarItem(
-                            selected = currentTab == AppTab.VERIFICATION && selectedCreditCard == null,
-                            onClick = {
-                                currentTab = AppTab.VERIFICATION
-                                selectedCreditCard = null
-                            },
-                            icon = {
-                                BadgedBox(
-                                    badge = {
-                                        if (pendingVerificationCount > 0) {
-                                            Badge { Text("$pendingVerificationCount") }
-                                        }
-                                    }
-                                ) {
-                                    Icon(AppIcons.CheckCircle, contentDescription = "Verification")
-                                }
-                            },
-                            label = { Text("Verify", fontSize = 11.sp) }
-                        )
-                        NavigationBarItem(
-                            selected = currentTab == AppTab.INTELLIGENCE && selectedCreditCard == null,
-                            onClick = {
-                                currentTab = AppTab.INTELLIGENCE
-                                selectedCreditCard = null
-                            },
-                            icon = { Icon(AppIcons.TrendingUp, contentDescription = "Intelligence") },
+                            icon = { Icon(AppIcons.TrendingUp, contentDescription = "Insights") },
                             label = { Text("Insights", fontSize = 11.sp) }
                         )
                         NavigationBarItem(
-                            selected = currentTab == AppTab.SETTINGS && selectedCreditCard == null,
+                            selected = currentTab == AppTab.PROFILE && selectedCreditCard == null && !showAccountsScreen,
                             onClick = {
-                                currentTab = AppTab.SETTINGS
+                                currentTab = AppTab.PROFILE
                                 selectedCreditCard = null
+                                showAccountsScreen = false
                             },
-                            icon = { Icon(AppIcons.Person, contentDescription = "Settings") },
+                            icon = { Icon(AppIcons.Person, contentDescription = "Profile") },
                             label = { Text("Profile", fontSize = 11.sp) }
                         )
                     }
                 },
                 floatingActionButton = {
-                    if (selectedCreditCard == null && (currentTab == AppTab.DASHBOARD || currentTab == AppTab.TRANSACTIONS)) {
+                    if (selectedCreditCard == null && !showAccountsScreen && (currentTab == AppTab.HOME || currentTab == AppTab.ACTIVITY)) {
                         FloatingActionButton(
                             onClick = { showAddTxnDialog = true },
                             containerColor = MaterialTheme.colorScheme.primary,
@@ -283,31 +273,14 @@ fun MainAppShell(
                                 onTransactionClick = { editingCategoryTxn = it }
                             )
                         }
-                        currentTab == AppTab.DASHBOARD -> {
-                            DashboardScreen(
-                                summary = summary,
-                                selectedPeriod = selectedPeriod,
-                                onPeriodSelected = { selectedPeriod = it },
-                                onAdjustBalanceClick = { adjustingAccount = it },
-                                onMarkBillPaidClick = { payingCreditCard = it },
-                                onTransactionClick = { editingCategoryTxn = it },
-                                onAddManualClick = { showAddTxnDialog = true },
-                                pendingVerificationCount = pendingVerificationCount,
-                                onNavigateToVerification = { currentTab = AppTab.VERIFICATION }
-                            )
-                        }
-                        currentTab == AppTab.TRANSACTIONS -> {
-                            TransactionsScreen(
-                                transactions = transactions,
-                                categories = categories,
-                                onTransactionClick = { editingCategoryTxn = it }
-                            )
-                        }
-                        currentTab == AppTab.ACCOUNTS -> {
+                        showAccountsScreen -> {
                             AccountsScreen(
                                 accounts = accounts,
                                 onAdjustBalanceClick = { adjustingAccount = it },
-                                onCardClick = { selectedCreditCard = it },
+                                onCardClick = {
+                                    selectedCreditCard = it
+                                    showAccountsScreen = false
+                                },
                                 onMarkBillPaidClick = { payingCreditCard = it },
                                 onAddAccount = { name, bank, type, subType, last4, initBal, limit, stmt, due ->
                                     coroutineScope.launch {
@@ -350,30 +323,57 @@ fun MainAppShell(
                                         repository.deleteAccount(account.id)
                                         snackbarHostState.showSnackbar("Deleted: ${account.name}")
                                     }
-                                }
+                                },
+                                onBackClick = { showAccountsScreen = false }
                             )
                         }
-                        currentTab == AppTab.VERIFICATION -> {
-                            VerificationScreen(
-                                verificationEvents = verificationEvents,
-                                accounts = accounts,
-                                onResolveEvent = { eventId, status, selectedAccountId ->
+                        currentTab == AppTab.HOME -> {
+                            DashboardScreen(
+                                summary = summary,
+                                selectedPeriod = selectedPeriod,
+                                onPeriodSelected = { selectedPeriod = it },
+                                onAdjustBalanceClick = { adjustingAccount = it },
+                                onMarkBillPaidClick = { payingCreditCard = it },
+                                onTransactionClick = { editingCategoryTxn = it },
+                                onAddManualClick = { showAddTxnDialog = true },
+                                pendingVerificationCount = pendingVerificationCount,
+                                onNavigateToVerification = { /* Handled inline */ },
+                                pendingReviewTransactions = pendingReviewTxns,
+                                onReviewTransaction = { reviewingTxn = it },
+                                creditCards = creditCards,
+                                onCardClick = { selectedCreditCard = it },
+                                onManageAccountsClick = { showAccountsScreen = true }
+                            )
+                        }
+                        currentTab == AppTab.ACTIVITY -> {
+                            TransactionsScreen(
+                                transactions = transactions,
+                                categories = categories,
+                                onTransactionClick = { editingCategoryTxn = it },
+                                onReviewClick = { reviewingTxn = it },
+                                onReverseClick = { item ->
                                     coroutineScope.launch {
-                                        repository.resolveVerificationEvent(eventId, status, selectedAccountId)
-                                        snackbarHostState.showSnackbar("Verification status updated: ${status.name}")
+                                        repository.reverseTransaction(item.transaction.id)
+                                        snackbarHostState.showSnackbar("Transaction reversed and ledger recalculated")
+                                    }
+                                },
+                                onDeleteClick = { item ->
+                                    coroutineScope.launch {
+                                        repository.deleteTransaction(item.transaction.id)
+                                        snackbarHostState.showSnackbar("Transaction deleted")
                                     }
                                 }
                             )
                         }
-                        currentTab == AppTab.INTELLIGENCE -> {
+                        currentTab == AppTab.INSIGHTS -> {
                             IntelligenceCenterScreen(
                                 repository = repository,
                                 insights = insights,
-                                onNavigateToVerification = { currentTab = AppTab.VERIFICATION },
-                                onNavigateToAccounts = { currentTab = AppTab.ACCOUNTS }
+                                onNavigateToVerification = { currentTab = AppTab.HOME },
+                                onNavigateToAccounts = { showAccountsScreen = true }
                             )
                         }
-                        currentTab == AppTab.SETTINGS -> {
+                        currentTab == AppTab.PROFILE -> {
                             ProfileSettingsScreen(
                                 repository = repository,
                                 onUserSwitched = {
@@ -381,11 +381,50 @@ fun MainAppShell(
                                     coroutineScope.launch {
                                         snackbarHostState.showSnackbar("Active profile switched!")
                                     }
-                                }
+                                },
+                                onNavigateToAccounts = { showAccountsScreen = true }
                             )
                         }
                     }
                 }
+            }
+
+            // Bottom Sheet: Fast Review Flow
+            reviewingTxn?.let { item ->
+                TransactionReviewSheet(
+                    item = item,
+                    allAccounts = accounts,
+                    onDismiss = { reviewingTxn = null },
+                    onConfirmCreditCard = { cardId ->
+                        coroutineScope.launch {
+                            val ok = repository.confirmCreditCardTransaction(item.transaction.id, cardId)
+                            reviewingTxn = null
+                            if (ok) {
+                                snackbarHostState.showSnackbar("Confirmed as Credit Card purchase! Balance updated.")
+                            }
+                        }
+                    },
+                    onConfirmBankAccount = { bankAccountId ->
+                        coroutineScope.launch {
+                            val ok = repository.resolveNeedsReviewTransaction(item.transaction.id, bankAccountId)
+                            reviewingTxn = null
+                            if (ok) {
+                                snackbarHostState.showSnackbar("Assigned to Bank Account!")
+                            }
+                        }
+                    },
+                    onReject = { reason, learnRule ->
+                        coroutineScope.launch {
+                            val ok = repository.rejectTransaction(item.transaction.id, reason, learnRule)
+                            reviewingTxn = null
+                            if (ok) {
+                                snackbarHostState.showSnackbar(
+                                    if (learnRule) "Alert discarded & filter rule learned!" else "Transaction discarded"
+                                )
+                            }
+                        }
+                    }
+                )
             }
 
             // Dialog: Adjust Balance
