@@ -867,4 +867,6 @@ object AppIcons {
         }.build()
     }
 
+    val Backspace: ImageVector by lazy { Delete }
+    val ShieldCheck: ImageVector by lazy { Shield }
 }

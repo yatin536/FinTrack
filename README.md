@@ -179,17 +179,17 @@ FinTrack/
 git clone https://github.com/yatin536/FinTrack.git
 cd FinTrack
 
-# Run unit tests
-./gradlew test
+# Run unit tests (40 passing tests)
+./gradlew testDebugUnitTest
 
-# Assemble release APK
+# Assemble production release APK
 ./gradlew assembleRelease
 ```
 
 ### 2. Direct Device Installation via ADB
 ```bash
 # Sideload the release APK directly to connected Android phone
-adb install -r -g FinTrack-v1.0.apk
+adb install -r -d app/build/outputs/apk/release/app-release.apk
 
 # Launch the application
 adb shell am start -n com.example.fintrack/.MainActivity
@@ -199,15 +199,9 @@ adb shell am start -n com.example.fintrack/.MainActivity
 
 ## 📖 Comprehensive Project Documentation
 
-A full **102-page Architecture & Code Documentation PDF** is included in this repository:
-👉 [**FinTrack_Architecture_and_Code_Documentation.pdf**](FinTrack_Architecture_and_Code_Documentation.pdf)
-
-It covers:
-- System Foundations & In-depth "Why & How" Architectural Decisions
-- Cryptographic Proofs & Play Protect Compliance Analysis
-- Table of Contents indexing every file with direct anchors
-- Complete, unabridged source code for all 55 repository files
-- Physical device verification screenshots and benchmark timings
+- 📘 [**Multi-User Architecture & Security Specification (v2.2)**](docs/USER_SYSTEM.md): Detailed guide covering user isolation, identity fallback, biometric prompt integration, and secondary device onboarding.
+- 📑 [**FinTrack Architecture & Code Documentation (v2)**](FinTrack_Architecture_and_Code_Documentation_v2.md): Exhaustive codebase and design guide.
+- 📕 [**FinTrack Architecture and Code Documentation (PDF)**](FinTrack_Architecture_and_Code_Documentation.pdf): Original system blueprint.
 
 ---
 

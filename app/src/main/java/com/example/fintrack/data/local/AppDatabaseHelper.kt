@@ -51,7 +51,7 @@ class AppDatabaseHelper(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "fintrack_secure.db"
-        const val DATABASE_VERSION = 5
+        const val DATABASE_VERSION = 6
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -82,7 +82,9 @@ class AppDatabaseHelper(context: Context) :
         const val COL_USER_PHONE = "phone"
         const val COL_USER_COLOR = "color_hex"
         const val COL_USER_IS_ACTIVE = "is_active"
+        const val COL_USER_BIOMETRIC = "biometric_enabled"
         const val COL_USER_CREATED = "created_at"
+        const val COL_USER_UPDATED = "updated_at"
 
         // Accounts Columns
         const val COL_ACC_ID = "id"
@@ -239,7 +241,9 @@ class AppDatabaseHelper(context: Context) :
                 $COL_USER_PHONE TEXT,
                 $COL_USER_COLOR INTEGER NOT NULL,
                 $COL_USER_IS_ACTIVE INTEGER NOT NULL DEFAULT 1,
-                $COL_USER_CREATED INTEGER NOT NULL
+                $COL_USER_BIOMETRIC INTEGER NOT NULL DEFAULT 0,
+                $COL_USER_CREATED INTEGER NOT NULL,
+                $COL_USER_UPDATED INTEGER NOT NULL DEFAULT 0
             )
             """.trimIndent()
         )
@@ -648,6 +652,22 @@ class AppDatabaseHelper(context: Context) :
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_mr_user ON $TABLE_MESSAGE_RULES ($COL_MR_USER_ID, $COL_MR_STATUS)")
             }
 
+            if (oldVersion < 6) {
+                addColumnIfNotExists(db, TABLE_USERS, COL_USER_BIOMETRIC, "INTEGER NOT NULL DEFAULT 0")
+                addColumnIfNotExists(db, TABLE_USERS, COL_USER_UPDATED, "INTEGER NOT NULL DEFAULT 0")
+
+                // Automatically migrate existing default user to "Yatin Kumar Singh"
+                db.execSQL(
+                    """
+                    UPDATE $TABLE_USERS 
+                    SET $COL_USER_NAME = 'Yatin Kumar Singh',
+                        $COL_USER_EMAIL = 'yatin@fintrack.local'
+                    WHERE $COL_USER_ID = '${User.DEFAULT_USER_ID}' 
+                      AND ($COL_USER_NAME = 'Primary User' OR $COL_USER_NAME = 'User' OR $COL_USER_NAME = 'Default User' OR $COL_USER_NAME IS NULL)
+                    """.trimIndent()
+                )
+            }
+
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -688,11 +708,13 @@ class AppDatabaseHelper(context: Context) :
     private fun seedDefaultUser(db: SQLiteDatabase) {
         val values = ContentValues().apply {
             put(COL_USER_ID, User.DEFAULT_USER_ID)
-            put(COL_USER_NAME, "Primary User")
-            put(COL_USER_EMAIL, "user@fintrack.local")
+            put(COL_USER_NAME, "Yatin Kumar Singh")
+            put(COL_USER_EMAIL, "yatin@fintrack.local")
             put(COL_USER_COLOR, 0xFF2563EB)
             put(COL_USER_IS_ACTIVE, 1)
+            put(COL_USER_BIOMETRIC, 0)
             put(COL_USER_CREATED, System.currentTimeMillis())
+            put(COL_USER_UPDATED, System.currentTimeMillis())
         }
         db.insertWithOnConflict(TABLE_USERS, null, values, SQLiteDatabase.CONFLICT_IGNORE)
     }
@@ -2734,15 +2756,33 @@ class AppDatabaseHelper(context: Context) :
         val list = mutableListOf<User>()
         val cursor = db.query(TABLE_USERS, null, null, null, null, null, "$COL_USER_CREATED ASC")
         cursor.use { c ->
+            val bioIdx = c.getColumnIndex(COL_USER_BIOMETRIC)
+            val updIdx = c.getColumnIndex(COL_USER_UPDATED)
             while (c.moveToNext()) {
                 val id = c.getString(c.getColumnIndexOrThrow(COL_USER_ID))
-                val name = c.getString(c.getColumnIndexOrThrow(COL_USER_NAME))
-                val email = c.getString(c.getColumnIndexOrThrow(COL_USER_EMAIL))
+                var name = c.getString(c.getColumnIndexOrThrow(COL_USER_NAME))
+                var email = c.getString(c.getColumnIndexOrThrow(COL_USER_EMAIL))
                 val phone = c.getString(c.getColumnIndexOrThrow(COL_USER_PHONE))
                 val color = c.getLong(c.getColumnIndexOrThrow(COL_USER_COLOR))
                 val isActive = c.getInt(c.getColumnIndexOrThrow(COL_USER_IS_ACTIVE)) == 1
+                val isBio = if (bioIdx != -1) c.getInt(bioIdx) == 1 else false
                 val created = c.getLong(c.getColumnIndexOrThrow(COL_USER_CREATED))
-                list.add(User(id, name, email, phone, color, isActive, created))
+                val updated = if (updIdx != -1) c.getLong(updIdx) else created
+
+                // Ensure legacy user is cleanly updated to Yatin Kumar Singh
+                if (id == User.DEFAULT_USER_ID && (name == "Primary User" || name == "User" || name == "Default User")) {
+                    name = "Yatin Kumar Singh"
+                    email = if (email.isNullOrBlank() || email == "user@fintrack.local") "yatin@fintrack.local" else email
+                    val updateValues = ContentValues().apply {
+                        put(COL_USER_NAME, name)
+                        put(COL_USER_EMAIL, email)
+                    }
+                    try {
+                        writableDatabase.update(TABLE_USERS, updateValues, "$COL_USER_ID = ?", arrayOf(id))
+                    } catch (_: Exception) {}
+                }
+
+                list.add(User(id, name, email, phone, color, isActive, isBio, created, updated))
             }
         }
         if (list.isEmpty()) {
@@ -2760,11 +2800,50 @@ class AppDatabaseHelper(context: Context) :
             put(COL_USER_PHONE, user.phoneNumber)
             put(COL_USER_COLOR, user.colorHex)
             put(COL_USER_IS_ACTIVE, if (user.isActive) 1 else 0)
+            put(COL_USER_BIOMETRIC, if (user.isBiometricEnabled) 1 else 0)
             put(COL_USER_CREATED, user.createdAt)
+            put(COL_USER_UPDATED, user.updatedAt)
         }
         val res = db.insertWithOnConflict(TABLE_USERS, null, values, SQLiteDatabase.CONFLICT_REPLACE)
         notifyDataChanged()
         return res != -1L
+    }
+
+    fun updateUser(user: User): Boolean {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put(COL_USER_NAME, user.name)
+            put(COL_USER_EMAIL, user.email)
+            put(COL_USER_PHONE, user.phoneNumber)
+            put(COL_USER_COLOR, user.colorHex)
+            put(COL_USER_IS_ACTIVE, if (user.isActive) 1 else 0)
+            put(COL_USER_BIOMETRIC, if (user.isBiometricEnabled) 1 else 0)
+            put(COL_USER_UPDATED, System.currentTimeMillis())
+        }
+        val rows = db.update(TABLE_USERS, values, "$COL_USER_ID = ?", arrayOf(user.id))
+        notifyDataChanged()
+        return rows > 0
+    }
+
+    fun deleteUser(userId: String): Boolean {
+        val db = writableDatabase
+        db.beginTransaction()
+        return try {
+            db.delete(TABLE_TRANSACTIONS, "$COL_TXN_USER_ID = ?", arrayOf(userId))
+            db.delete(TABLE_ACCOUNTS, "$COL_ACC_USER_ID = ?", arrayOf(userId))
+            db.delete(TABLE_IMPORTED_SMS, "$COL_SMS_USER_ID = ?", arrayOf(userId))
+            db.delete(TABLE_MESSAGE_RULES, "$COL_MR_USER_ID = ?", arrayOf(userId))
+            db.delete(TABLE_VERIFICATION_EVENTS, "$COL_VERIF_USER_ID = ?", arrayOf(userId))
+            db.delete(TABLE_AUDIT_LOGS, "$COL_AUDIT_USER_ID = ?", arrayOf(userId))
+            db.delete(TABLE_RECONCILIATION_LOGS, "$COL_REC_USER_ID = ?", arrayOf(userId))
+            db.delete(TABLE_ACCOUNT_ALIASES, "$COL_ALIAS_USER_ID = ?", arrayOf(userId))
+            val rows = db.delete(TABLE_USERS, "$COL_USER_ID = ?", arrayOf(userId))
+            db.setTransactionSuccessful()
+            notifyDataChanged()
+            rows > 0
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun getUserById(userId: String): User? {

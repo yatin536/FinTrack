@@ -85,7 +85,7 @@ fun MainAppShell(
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showSplash by remember { mutableStateOf(true) }
-    var isAuthenticated by remember { mutableStateOf(!pinManager.isPinSet) }
+    var isAuthenticated by remember { mutableStateOf(false) }
     var currentTab by remember { mutableStateOf(AppTab.HOME) }
     var selectedPeriod by remember { mutableStateOf(TimePeriod.MONTHLY) }
 
@@ -104,6 +104,8 @@ fun MainAppShell(
     var userRefreshTrigger by remember { mutableStateOf(0) }
 
     // Reactive State Flows from Repository
+    val activeUserName by repository.sessionManager.activeUserNameFlow.collectAsState(initial = repository.sessionManager.getActiveUserName())
+    val activeUser by repository.getActiveUserFlow().collectAsState(initial = null)
     val summary by repository.getDashboardSummary(selectedPeriod).collectAsState(initial = com.example.fintrack.data.model.DashboardSummary())
     val transactions by repository.getTransactions().collectAsState(initial = emptyList())
     val accounts by repository.getAccounts().collectAsState(initial = emptyList())
@@ -125,6 +127,7 @@ fun MainAppShell(
     Crossfade(targetState = isAuthenticated, label = "AuthCrossfade") { authenticated ->
         if (!authenticated) {
             AuthScreen(
+                repository = repository,
                 pinManager = pinManager,
                 onAuthenticated = { isAuthenticated = true }
             )
@@ -331,6 +334,7 @@ fun MainAppShell(
                             DashboardScreen(
                                 summary = summary,
                                 selectedPeriod = selectedPeriod,
+                                userName = activeUser?.displayName ?: activeUserName,
                                 onPeriodSelected = { selectedPeriod = it },
                                 onAdjustBalanceClick = { adjustingAccount = it },
                                 onMarkBillPaidClick = { payingCreditCard = it },
@@ -382,7 +386,8 @@ fun MainAppShell(
                                         snackbarHostState.showSnackbar("Active profile switched!")
                                     }
                                 },
-                                onNavigateToAccounts = { showAccountsScreen = true }
+                                onNavigateToAccounts = { showAccountsScreen = true },
+                                onLogout = { isAuthenticated = false }
                             )
                         }
                     }

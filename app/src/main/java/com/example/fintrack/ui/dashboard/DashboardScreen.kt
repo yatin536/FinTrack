@@ -62,6 +62,7 @@ import java.util.Locale
 fun DashboardScreen(
     summary: DashboardSummary,
     selectedPeriod: TimePeriod,
+    userName: String = "Yatin Kumar Singh",
     onPeriodSelected: (TimePeriod) -> Unit,
     onAdjustBalanceClick: (Account) -> Unit,
     onMarkBillPaidClick: (Account) -> Unit = {},
@@ -77,6 +78,15 @@ fun DashboardScreen(
     modifier: Modifier = Modifier
 ) {
     val primaryAccount = summary.accounts.firstOrNull { it.isPrimary } ?: summary.accounts.firstOrNull()
+
+    val calendar = java.util.Calendar.getInstance()
+    val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+    val greeting = when {
+        hour < 12 -> "Good morning"
+        hour < 17 -> "Good afternoon"
+        else -> "Good evening"
+    }
+    val firstName = userName.trim().split(" ").firstOrNull()?.ifBlank { "User" } ?: "User"
 
     LazyColumn(
         modifier = modifier
@@ -94,7 +104,12 @@ fun DashboardScreen(
             ) {
                 Column {
                     Text(
-                        text = "FinTrack Ledger",
+                        text = "$greeting,",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "$firstName 👋",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold
                     )

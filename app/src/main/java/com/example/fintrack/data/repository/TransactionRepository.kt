@@ -62,9 +62,9 @@ class TransactionRepository(context: Context) {
     }.flowOn(Dispatchers.IO)
 
     fun getTransactions(userId: String = sessionManager.getActiveUserId()): Flow<List<TransactionWithDetails>> = flow {
-        emit(dbHelper.getTransactionsWithDetails().filter { it.transaction.userId == userId })
+        emit(dbHelper.getTransactionsWithDetails(userId = userId, includePending = true, includeRejected = true))
         dbHelper.dbChangeSignal.collect {
-            emit(dbHelper.getTransactionsWithDetails().filter { it.transaction.userId == userId })
+            emit(dbHelper.getTransactionsWithDetails(userId = userId, includePending = true, includeRejected = true))
         }
     }.flowOn(Dispatchers.IO)
 
@@ -133,22 +133,6 @@ class TransactionRepository(context: Context) {
         withContext(Dispatchers.IO) {
             intelligenceEngine.answerFinancialQuestion(query, userId)
         }
-
-    // --- Multi-User Management ---
-    suspend fun getUsers(): List<User> = withContext(Dispatchers.IO) {
-        dbHelper.getUsers()
-    }
-
-    suspend fun createUser(name: String, email: String? = null): User = withContext(Dispatchers.IO) {
-        val user = User(
-            id = UUID.randomUUID().toString(),
-            name = name,
-            email = email,
-            createdAt = System.currentTimeMillis()
-        )
-        dbHelper.insertUser(user)
-        user
-    }
 
     fun switchUser(user: User) {
         sessionManager.switchUser(user.id, user.name)
@@ -598,4 +582,65 @@ class TransactionRepository(context: Context) {
 
         return@withContext true
     }
+
+    // --- User & Profile Management ---
+    fun getUsers(): List<User> = dbHelper.getUsers()
+
+    fun getUserById(userId: String): User? = dbHelper.getUserById(userId)
+
+    suspend fun updateUser(user: User): Boolean = withContext(Dispatchers.IO) {
+        val ok = dbHelper.updateUser(user)
+        if (ok && user.id == sessionManager.getActiveUserId()) {
+            sessionManager.setActiveUserName(user.name)
+        }
+        ok
+    }
+
+    suspend fun createUser(
+        name: String,
+        email: String? = null,
+        phone: String? = null,
+        colorHex: Long = 0xFF2563EB
+    ): User = withContext(Dispatchers.IO) {
+        val user = User(
+            id = UUID.randomUUID().toString(),
+            name = name.trim(),
+            email = email?.trim()?.ifBlank { null },
+            phoneNumber = phone?.trim()?.ifBlank { null },
+            colorHex = colorHex,
+            isActive = true,
+            createdAt = System.currentTimeMillis(),
+            updatedAt = System.currentTimeMillis()
+        )
+        dbHelper.insertUser(user)
+
+        // Seed a default primary bank account for this new user
+        val defaultAccount = Account(
+            id = UUID.randomUUID().toString(),
+            userId = user.id,
+            name = "Primary Bank Account",
+            bankName = "General",
+            accountType = AccountType.BANK_ACCOUNT,
+            bankAccountType = BankAccountType.SAVINGS,
+            accountNumberLast4 = "",
+            creditLimit = 0.0,
+            initialBalance = 0.0,
+            currentBalance = 0.0,
+            isPrimary = true
+        )
+        dbHelper.insertAccount(defaultAccount)
+
+        user
+    }
+
+    suspend fun deleteUser(userId: String): Boolean = withContext(Dispatchers.IO) {
+        dbHelper.deleteUser(userId)
+    }
+
+    fun getActiveUserFlow(): Flow<User?> = flow {
+        emit(dbHelper.getUserById(sessionManager.getActiveUserId()) ?: User.DEFAULT_USER)
+        dbHelper.dbChangeSignal.collect {
+            emit(dbHelper.getUserById(sessionManager.getActiveUserId()) ?: User.DEFAULT_USER)
+        }
+    }.flowOn(Dispatchers.IO)
 }

@@ -1,6 +1,8 @@
 package com.example.fintrack.ui.profile
 
 import android.content.Context
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -45,6 +47,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -52,12 +55,15 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import com.example.fintrack.data.local.PinManager
 import com.example.fintrack.data.model.AuditLog
 import com.example.fintrack.data.model.MessageRule
 import com.example.fintrack.data.model.User
 import com.example.fintrack.data.repository.TransactionRepository
 import com.example.fintrack.ui.components.AppIcons
+import com.example.fintrack.ui.components.UserDetailsSheet
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -68,12 +74,15 @@ fun ProfileSettingsScreen(
     repository: TransactionRepository,
     onUserSwitched: () -> Unit,
     onNavigateToAccounts: () -> Unit = {},
+    onLogout: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val fragmentActivity = context as? FragmentActivity
     val pinManager = remember { PinManager(context) }
     val scope = rememberCoroutineScope()
 
+    val activeUser by repository.getActiveUserFlow().collectAsState(initial = null)
     var users by remember { mutableStateOf<List<User>>(emptyList()) }
     var activeUserId by remember { mutableStateOf(repository.sessionManager.getActiveUserId()) }
     var activeUserName by remember { mutableStateOf(repository.sessionManager.getActiveUserName()) }
@@ -85,8 +94,18 @@ fun ProfileSettingsScreen(
     var showChangePinDialog by remember { mutableStateOf(false) }
     var showPrivacyDialog by remember { mutableStateOf(false) }
     var showRulesDialog by remember { mutableStateOf(false) }
+    var showUserDetailsSheet by remember { mutableStateOf(false) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
 
     val messageRules by repository.getMessageRules(activeUserId).collectAsState(initial = emptyList())
+
+    LaunchedEffect(activeUser) {
+        activeUser?.let { u ->
+            activeUserId = u.id
+            activeUserName = u.name
+            biometricEnabled = u.isBiometricEnabled
+        }
+    }
 
     fun refreshUsers() {
         scope.launch {
@@ -123,56 +142,158 @@ fun ProfileSettingsScreen(
         // Active Profile Card
         item {
             Card(
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showUserDetailsSheet = true }
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(activeUser?.colorHex ?: 0xFF2563EB),
+                                modifier = Modifier.size(54.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = (activeUser?.displayName ?: activeUserName).take(1).uppercase(),
+                                        color = Color.White,
+                                        fontSize = 24.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            Column {
+                                Text(
+                                    text = activeUser?.displayName ?: activeUserName,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = activeUser?.email ?: "Personal Financial Vault",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF10B981))
+                                    )
+                                    Spacer(Modifier.width(5.dp))
+                                    Text(
+                                        text = "Active Profile",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF10B981)
+                                    )
+                                }
+                            }
+                        }
+
+                        IconButton(onClick = { showUserDetailsSheet = true }) {
+                            Icon(
+                                imageVector = AppIcons.ChevronRight,
+                                contentDescription = "View Details",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { showUserDetailsSheet = true },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Edit Details", fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = { showUserSwitchDialog = true },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Switch Profile", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Personal Details & Identity Row
+        item {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showUserDetailsSheet = true }
             ) {
                 Row(
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .fillMaxWidth(),
+                    modifier = Modifier.padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Surface(
                             shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(52.dp)
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(40.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = activeUserName.take(1).uppercase(),
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    fontSize = 22.sp,
-                                    fontWeight = FontWeight.Bold
+                                Icon(
+                                    imageVector = AppIcons.Person,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
 
                         Column {
                             Text(
-                                text = activeUserName,
-                                style = MaterialTheme.typography.titleMedium,
+                                text = "Personal Details & Identity",
+                                style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Profile ID: ${activeUserId.take(12)}...",
-                                fontSize = 11.sp,
+                                text = "View and edit full name, email, phone & membership",
+                                fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
 
-                    OutlinedButton(
-                        onClick = { showUserSwitchDialog = true },
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Switch", fontSize = 12.sp)
-                    }
+                    Icon(
+                        imageVector = AppIcons.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -320,8 +441,52 @@ fun ProfileSettingsScreen(
                         Switch(
                             checked = biometricEnabled,
                             onCheckedChange = { isChecked ->
-                                biometricEnabled = isChecked
-                                pinManager.isBiometricEnabled = isChecked
+                                if (isChecked) {
+                                    if (fragmentActivity != null) {
+                                        val executor = ContextCompat.getMainExecutor(context)
+                                        val prompt = BiometricPrompt(
+                                            fragmentActivity,
+                                            executor,
+                                            object : BiometricPrompt.AuthenticationCallback() {
+                                                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                                                    biometricEnabled = true
+                                                    pinManager.isBiometricEnabled = true
+                                                    activeUser?.let { u ->
+                                                        scope.launch {
+                                                            repository.updateUser(u.copy(isBiometricEnabled = true))
+                                                        }
+                                                    }
+                                                }
+                                                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                                                    biometricEnabled = false
+                                                }
+                                            }
+                                        )
+                                        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                                            .setTitle("Enable Biometric Unlock")
+                                            .setSubtitle("Confirm your biometric identity to enable quick unlock")
+                                            .setNegativeButtonText("Cancel")
+                                            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                                            .build()
+                                        prompt.authenticate(promptInfo)
+                                    } else {
+                                        biometricEnabled = true
+                                        pinManager.isBiometricEnabled = true
+                                        activeUser?.let { u ->
+                                            scope.launch {
+                                                repository.updateUser(u.copy(isBiometricEnabled = true))
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    biometricEnabled = false
+                                    pinManager.isBiometricEnabled = false
+                                    activeUser?.let { u ->
+                                        scope.launch {
+                                            repository.updateUser(u.copy(isBiometricEnabled = false))
+                                        }
+                                    }
+                                }
                             }
                         )
                     }
@@ -416,6 +581,63 @@ fun ProfileSettingsScreen(
         } else {
             items(auditLogs.take(10), key = { it.id }) { log ->
                 AuditLogItem(log = log)
+            }
+        }
+
+        // Session / Log Out Card
+        item {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showLogoutDialog = true }
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = AppIcons.Lock,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        Column {
+                            Text(
+                                text = "Log Out of FinTrack",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                text = "Lock encrypted vault and return to unlock screen",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Icon(
+                        imageVector = AppIcons.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
             }
         }
 
@@ -735,6 +957,51 @@ fun ProfileSettingsScreen(
             confirmButton = {
                 TextButton(onClick = { showRulesDialog = false }) {
                     Text("Done")
+                }
+            }
+        )
+    }
+
+    // Dialog: Log Out Confirmation
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            title = { Text("Log Out of FinTrack?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text("Logging out will lock your local financial vault and return to the unlock screen. All encrypted data remains completely intact on this device.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showLogoutDialog = false
+                        repository.sessionManager.logout()
+                        onLogout()
+                    },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Log Out")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showLogoutDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Sheet: User Details & Profile Editor
+    if (showUserDetailsSheet && activeUser != null) {
+        UserDetailsSheet(
+            user = activeUser!!,
+            onDismiss = { showUserDetailsSheet = false },
+            onSaveProfile = { updated ->
+                scope.launch {
+                    repository.updateUser(updated)
+                    showUserDetailsSheet = false
+                    refreshUsers()
                 }
             }
         )
