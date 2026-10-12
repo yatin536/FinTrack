@@ -390,6 +390,26 @@ class TransactionRepository(context: Context) {
         val targetAccountId = account?.id ?: ""
         val initialStatus = if (needsReview) TransactionStatus.PENDING_REVIEW else TransactionStatus.CONFIRMED
 
+        // 3.5 Multi-Message Transaction Correlation (e.g. Amazon alert + Bank debit alert)
+        // Correlates multiple alerts arriving within a 15-minute sliding window for the same purchase,
+        // fuses them into a single transaction, deduplicates ledger deductions, and syncs closing balance.
+        val recentTransactions = dbHelper.getRecentTransactions(activeUserId, parsed.timestamp - (15 * 60 * 1000L))
+        val correlatedTxn = findCorrelatedTransaction(recentTransactions, parsed, sender, fullBody)
+
+        if (correlatedTxn != null) {
+            handleCorrelatedTransaction(
+                existing = correlatedTxn,
+                parsed = parsed,
+                sender = sender,
+                fullBody = fullBody,
+                account = account,
+                targetAccountId = targetAccountId,
+                needsReview = needsReview,
+                activeUserId = activeUserId
+            )
+            return@withContext true
+        }
+
         // 4. Handle Credit Card Bill Statement / Due notice (Informational only, not an expense, NEVER marked as PAID)
         if (parsed.kind == TransactionKind.CARD_BILL_DUE || parsed.kind == TransactionKind.CARD_BILL_GENERATED) {
             val newBillStatus = if (parsed.kind == TransactionKind.CARD_BILL_GENERATED) BillStatus.GENERATED else BillStatus.DUE
@@ -643,4 +663,120 @@ class TransactionRepository(context: Context) {
             emit(dbHelper.getUserById(sessionManager.getActiveUserId()) ?: User.DEFAULT_USER)
         }
     }.flowOn(Dispatchers.IO)
+
+    // ==========================================
+    // MULTI-MESSAGE TRANSACTION CORRELATION
+    // ==========================================
+
+    private fun findCorrelatedTransaction(
+        recent: List<Transaction>,
+        parsed: com.example.fintrack.parser.ParsedTransaction,
+        sender: String?,
+        fullBody: String
+    ): Transaction? {
+        return recent.firstOrNull { existing ->
+            com.example.fintrack.engine.TransactionCorrelationEngine.isCorrelated(existing, parsed, sender, fullBody)
+        }
+    }
+
+    private fun handleCorrelatedTransaction(
+        existing: Transaction,
+        parsed: com.example.fintrack.parser.ParsedTransaction,
+        sender: String?,
+        fullBody: String,
+        account: Account?,
+        targetAccountId: String,
+        needsReview: Boolean,
+        activeUserId: String
+    ) {
+        val incomingIsBank = IndianBankSmsParser.isBankSender(sender) || parsed.availableBalance != null || !parsed.referenceNumber.isNullOrBlank()
+
+        // 1. Account Resolution: Prefer verified bank account from bank alert
+        val resolvedAccountId = if (account != null && !account.isCreditCard && (existing.accountId.isBlank() || existing.accountId == "unknown")) {
+            account.id
+        } else if (account != null && !account.isCreditCard && incomingIsBank) {
+            account.id
+        } else {
+            existing.accountId.ifBlank { targetAccountId }
+        }
+
+        // 2. Merchant Resolution: Prefer clean merchant name from merchant alert
+        val mergedMerchant = com.example.fintrack.engine.TransactionCorrelationEngine.resolveMergedMerchant(
+            existingMerchant = existing.merchant,
+            existingSender = existing.smsSender,
+            existingBody = existing.rawSmsBody,
+            incomingMerchant = parsed.merchant,
+            incomingSender = sender,
+            incomingBody = fullBody
+        )
+
+
+        // 3. Category Resolution: Re-categorize with clean merchant name if needed
+        val catId = if (existing.categoryId == "cat_other" || existing.categoryId == "cat_general") {
+            categorizer.categorize(mergedMerchant, fullBody, existing.direction)
+        } else {
+            existing.categoryId
+        }
+
+        // 4. Reference Number: Take UTR from bank alert
+        val mergedRef = parsed.referenceNumber ?: existing.referenceNumber
+
+        // 5. Balance After Transaction: Take official closing balance from bank alert
+        val mergedBalAfter = parsed.availableBalance ?: existing.balanceAfterTxn
+        val mergedCreditAfter = parsed.availableCredit ?: existing.availableCreditAfterTxn
+
+        // 6. Audit Trail: Append incoming SMS alert to raw SMS body
+        val updatedRawSms = "${existing.rawSmsBody ?: ""}\n---\n[Correlated Alert from ${sender ?: "Unknown"}]: $fullBody"
+
+        val updatedTxn = existing.copy(
+            accountId = resolvedAccountId,
+            sourceAccountId = resolvedAccountId,
+            categoryId = catId,
+            merchant = mergedMerchant,
+            referenceNumber = mergedRef,
+            balanceAfterTxn = mergedBalAfter,
+            availableCreditAfterTxn = mergedCreditAfter,
+            rawSmsBody = updatedRawSms,
+            needsReview = false, // Dual correlation confirms the transaction with 100% certainty
+            reviewReason = null,
+            status = TransactionStatus.CONFIRMED
+        )
+
+        dbHelper.updateTransaction(updatedTxn)
+
+        // Self-learning: save merchant rule for future categorization
+        if (mergedMerchant.isNotBlank() && !mergedMerchant.contains("Payment", ignoreCase = true)) {
+            dbHelper.saveMerchantRule(mergedMerchant, catId)
+        }
+
+        // Reconcile official bank closing balance if available
+        val matchedAccount = if (resolvedAccountId.isNotBlank()) dbHelper.getAccountById(resolvedAccountId) else account
+        if (matchedAccount != null) {
+            if (parsed.availableBalance != null && !matchedAccount.isCreditCard) {
+                reconciliationEngine.reconcile(matchedAccount, parsed.availableBalance, parsed.timestamp)
+            } else if (parsed.availableCredit != null && matchedAccount.isCreditCard) {
+                val updatedCc = matchedAccount.copy(
+                    availableCredit = parsed.availableCredit,
+                    lastConfirmedBalance = parsed.availableCredit,
+                    lastConfirmedAt = parsed.timestamp
+                )
+                dbHelper.updateAccount(updatedCc)
+            }
+        }
+
+        // Record in imported SMS log as correlated/processed
+        dbHelper.insertImportedSms(
+            ImportedSmsAlert(
+                sender = sender ?: "Unknown",
+                body = fullBody,
+                status = SmsAlertStatus.PROCESSED,
+                transactionId = existing.id,
+                accountId = matchedAccount?.id,
+                confidence = 1.0,
+                reason = "Multi-message correlated with '${mergedMerchant}' purchase (Merged into single transaction, double-deduction prevented)",
+                userId = activeUserId
+            )
+        )
+    }
 }
+

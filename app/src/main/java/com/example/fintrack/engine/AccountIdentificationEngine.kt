@@ -135,8 +135,51 @@ class AccountIdentificationEngine(private val dbHelper: AppDatabaseHelper? = nul
                     )
                 }
             } else {
-                // SMS specifies last4, but user has no account matching this last4.
-                // Do NOT guess or modify a different card/account.
+                // SMS specifies last4, but no account in vault has this account number last4.
+                // Check if this is a Debit Card transaction belonging to a Bank Account
+                val isDebitCardSms = parsed.isDebitCard || lowerBody.contains("debit card") || lowerBody.contains("debitcard") || lowerBody.contains("dc ending") || lowerBody.contains("dc no")
+                if (isDebitCardSms) {
+                    val matchingBankAccounts = accounts.filter { !it.isCreditCard && isBankMatch(it.bankName, bankName) }
+                    if (matchingBankAccounts.size == 1) {
+                        val bankAcc = matchingBankAccounts.first()
+                        // Auto-learn debit card alias for future instant matching
+                        dbHelper?.addAccountAlias(
+                            AccountAlias(
+                                accountId = bankAcc.id,
+                                aliasPattern = last4,
+                                senderPattern = sender
+                            )
+                        )
+                        return AccountMatchResult(
+                            account = bankAcc,
+                            confidence = 0.95,
+                            matchReason = "Matched Debit Card ••$last4 to ${bankAcc.bankName} account ••${bankAcc.accountNumberLast4}",
+                            needsReview = false
+                        )
+                    } else if (matchingBankAccounts.size > 1) {
+                        val primaryChoice = matchingBankAccounts.firstOrNull { it.isPrimary } ?: matchingBankAccounts.first()
+                        return AccountMatchResult(
+                            account = primaryChoice,
+                            confidence = 0.85,
+                            matchReason = "Matched Debit Card ••$last4 to primary ${primaryChoice.bankName} account",
+                            needsReview = false
+                        )
+                    } else if (bankName == "Bank") {
+                        // User has only 1 bank account in vault overall and SMS didn't name a bank
+                        val allBankAccounts = accounts.filter { !it.isCreditCard }
+                        if (allBankAccounts.size == 1) {
+                            val singleBankAcc = allBankAccounts.first()
+                            return AccountMatchResult(
+                                account = singleBankAcc,
+                                confidence = 0.90,
+                                matchReason = "Matched Debit Card ••$last4 to bank account ${singleBankAcc.name}",
+                                needsReview = false
+                            )
+                        }
+                    }
+                }
+
+                // If target was a Credit Card or no bank account could be correlated:
                 return AccountMatchResult(
                     account = null,
                     confidence = CONFIDENCE_UNKNOWN,
@@ -152,26 +195,48 @@ class AccountIdentificationEngine(private val dbHelper: AppDatabaseHelper? = nul
             val singleBankAcc = matchingBank.first()
             val typeMatches = if (targetIsCard) singleBankAcc.isCreditCard else !singleBankAcc.isCreditCard
             if (typeMatches) {
-                // If last4 was missing in SMS, require review unless this is the only account for that bank
                 return AccountMatchResult(
                     account = singleBankAcc,
-                    confidence = 0.75,
-                    matchReason = "Inferred single ${if (targetIsCard) "Card" else "Account"} for $bankName (no last 4 in SMS)",
+                    confidence = 0.92,
+                    matchReason = "Inferred single ${if (targetIsCard) "Card" else "Account"} for $bankName",
                     needsReview = false
                 )
             }
         } else if (matchingBank.size > 1) {
-            // Multiple accounts for the same bank, ambiguous which one was debited/credited
-            val defaultChoice = matchingBank.firstOrNull { it.isPrimary } ?: matchingBank.first()
-            return AccountMatchResult(
-                account = defaultChoice,
-                confidence = CONFIDENCE_BANK_ONLY,
-                matchReason = "Multiple $bankName accounts found; last 4 digits missing in SMS",
-                needsReview = true
-            )
+            val filteredByType = matchingBank.filter { if (targetIsCard) it.isCreditCard else !it.isCreditCard }
+            if (filteredByType.size == 1) {
+                return AccountMatchResult(
+                    account = filteredByType.first(),
+                    confidence = 0.90,
+                    matchReason = "Inferred unique matching ${if (targetIsCard) "Card" else "Account"} for $bankName",
+                    needsReview = false
+                )
+            } else if (filteredByType.size > 1) {
+                val defaultChoice = filteredByType.firstOrNull { it.isPrimary } ?: filteredByType.first()
+                return AccountMatchResult(
+                    account = defaultChoice,
+                    confidence = CONFIDENCE_BANK_ONLY,
+                    matchReason = "Multiple $bankName accounts found; last 4 digits missing in SMS",
+                    needsReview = true
+                )
+            }
         }
 
-        // 4. Ambiguous or completely unknown
+        // 4. If user only has a single Bank Account (or single Credit Card) in total, match it directly!
+        val singleTypeAccounts = accounts.filter { if (targetIsCard) it.isCreditCard else !it.isCreditCard }
+        if (singleTypeAccounts.size == 1 && bankName != "Unknown Bank" && bankName != "Unknown") {
+            val soleAcc = singleTypeAccounts.first()
+            if (isBankMatch(soleAcc.bankName, bankName) || bankName == "Bank") {
+                return AccountMatchResult(
+                    account = soleAcc,
+                    confidence = 0.92,
+                    matchReason = "Matched user's sole configured ${if (targetIsCard) "Credit Card" else "Bank Account"} (${soleAcc.name})",
+                    needsReview = false
+                )
+            }
+        }
+
+        // 5. Ambiguous or completely unknown
         val fallbackAccount = accounts.firstOrNull { it.isPrimary } ?: accounts.first()
         return AccountMatchResult(
             account = fallbackAccount,

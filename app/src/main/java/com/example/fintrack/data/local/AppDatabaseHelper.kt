@@ -1415,6 +1415,67 @@ class AppDatabaseHelper(context: Context) :
         return res != -1L
     }
 
+    fun updateTransaction(transaction: Transaction): Boolean {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put(COL_TXN_USER_ID, transaction.userId)
+            put(COL_TXN_ACC_ID, transaction.accountId)
+            put(COL_TXN_SOURCE_ACC_ID, transaction.sourceAccountId ?: transaction.accountId)
+            put(COL_TXN_DEST_ACC_ID, transaction.destinationAccountId)
+            put(COL_TXN_CAT_ID, transaction.categoryId)
+            put(COL_TXN_AMOUNT, SecurityManager.encryptDouble(transaction.amount))
+            put(COL_TXN_TYPE, transaction.direction.name)
+            put(COL_TXN_KIND, transaction.kind.name)
+            put(COL_TXN_TIMESTAMP, transaction.timestamp)
+            put(COL_TXN_MERCHANT, SecurityManager.encrypt(transaction.merchant))
+            put(COL_TXN_RAW_SMS, SecurityManager.encrypt(transaction.rawSmsBody))
+            put(COL_TXN_SMS_SENDER, transaction.smsSender)
+            put(COL_TXN_REF_NO, transaction.referenceNumber)
+            put(
+                COL_TXN_BAL_AFTER,
+                transaction.balanceAfterTxn?.let { SecurityManager.encryptDouble(it) }
+            )
+            put(
+                COL_TXN_AVAIL_CREDIT_AFTER,
+                transaction.availableCreditAfterTxn?.let { SecurityManager.encryptDouble(it) }
+            )
+            put(COL_TXN_IS_MANUAL, if (transaction.isManual) 1 else 0)
+            put(COL_TXN_NOTE, SecurityManager.encrypt(transaction.note))
+            put(COL_TXN_NEEDS_REVIEW, if (transaction.needsReview) 1 else 0)
+            put(COL_TXN_REVIEW_REASON, transaction.reviewReason)
+            put(COL_TXN_STATUS, transaction.status.name)
+            put(COL_TXN_FINGERPRINT, transaction.fingerprint)
+            put(COL_TXN_LINKED_TXN_ID, transaction.linkedTransactionId)
+        }
+        val rows = db.update(TABLE_TRANSACTIONS, values, "$COL_TXN_ID = ?", arrayOf(transaction.id))
+        notifyDataChanged()
+        return rows > 0
+    }
+
+    fun getRecentTransactions(
+        userId: String,
+        sinceTimestamp: Long
+    ): List<Transaction> {
+        val db = readableDatabase
+        val list = mutableListOf<Transaction>()
+        val cursor = db.query(
+            TABLE_TRANSACTIONS,
+            null,
+            "$COL_TXN_USER_ID = ? AND $COL_TXN_TIMESTAMP >= ?",
+            arrayOf(userId, sinceTimestamp.toString()),
+            null,
+            null,
+            "$COL_TXN_TIMESTAMP DESC",
+            "50"
+        )
+        cursor.use { c ->
+            while (c.moveToNext()) {
+                list.add(parseTransactionCursor(c))
+            }
+        }
+        return list
+    }
+
     /**
      * Atomic Credit Card Bill Payment:
      * - Records CARD_PAYMENT transaction

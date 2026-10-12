@@ -71,7 +71,7 @@ data class Transaction(
     val accountId: String, // Primary financial instrument
     val sourceAccountId: String? = null, // In transfers/payments: source account
     val destinationAccountId: String? = null, // In transfers/payments: destination account
-    val categoryId: String,
+    val categoryId: String = "cat_other",
     val amount: Double,
     val direction: TransactionDirection = TransactionDirection.DEBIT,
     val kind: TransactionKind = TransactionKind.EXPENSE,

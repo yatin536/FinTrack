@@ -12,12 +12,17 @@ import java.util.regex.Pattern
  */
 object IndianBankSmsParser {
 
-    // Spam / OTP keywords that must be rejected immediately
+    // Spam / OTP keywords that must be rejected when no transaction occurred
     private val OTP_SPAM_PATTERNS = listOf(
         Pattern.compile("\\b(?:otp|one time password|verification code|secret code)\\b", Pattern.CASE_INSENSITIVE),
         Pattern.compile("\\b(?:do not share|don't share|never share)\\b", Pattern.CASE_INSENSITIVE),
         Pattern.compile("\\b(?:pre-approved|apply now|congratulations|click here|claim your)\\b", Pattern.CASE_INSENSITIVE),
         Pattern.compile("\\b(?:loan|insurance policy|credit limit increased)\\b", Pattern.CASE_INSENSITIVE)
+    )
+
+    // Debit Card indicators (Debit cards belong directly to Bank Accounts)
+    private val DEBIT_CARD_PATTERNS = listOf(
+        Pattern.compile("\\b(?:debit\\s*card|debitcard|dc\\s*ending|dc\\s*no|dc\\s*xx|via\\s+debit|using\\s+debit|on\\s+(?:your\\s+)?debit\\s*card)\\b", Pattern.CASE_INSENSITIVE)
     )
 
     // Credit Card indicators
@@ -56,40 +61,43 @@ object IndianBankSmsParser {
     )
 
     private val DEBIT_PATTERNS = listOf(
-        Pattern.compile("\\b(?:debited|spent|paid|purchase|withdrawn|deducted|used)\\b", Pattern.CASE_INSENSITIVE)
+        Pattern.compile("\\b(?:debited|spent|paid|purchase|withdrawn|deducted|used|order(?:ed|\\s+placed|\\s+confirmed)?|placed\\s+for)\\b", Pattern.CASE_INSENSITIVE)
     )
 
     private val CREDIT_PATTERNS = listOf(
         Pattern.compile("\\b(?:credited|received|deposited|refunded|reversed|cashback|salary)\\b", Pattern.CASE_INSENSITIVE)
     )
 
+    // Currency indicators (Rs, INR, ₹, \u20B9)
+    private const val CURRENCY_SYM = "(?:rs\\.?|inr|₹|\\u20B9)"
+
     // Amount patterns
     private val AMOUNT_PATTERN = Pattern.compile(
-        "(?:(?:rs\\.?|inr)\\s*([0-9,]+(?:\\.[0-9]{1,2})?))|(?:([0-9,]+(?:\\.[0-9]{1,2})?)\\s*(?:rs\\.?|inr))",
+        "(?:$CURRENCY_SYM\\s*([0-9,]+(?:\\.[0-9]{1,2})?))|(?:([0-9,]+(?:\\.[0-9]{1,2})?)\\s*$CURRENCY_SYM)",
         Pattern.CASE_INSENSITIVE
     )
 
     // Available Bank Balance pattern
     private val BANK_BALANCE_PATTERN = Pattern.compile(
-        "(?:avl(?:\\.|\\s*bal)|avail(?:able)?\\s*bal(?:ance)?|bal(?:ance)?)\\s*(?:is|:|–|-)?\\s*(?:inr|rs\\.?|rs)?\\s*(?:is|:|–|-)?\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
+        "(?:avl(?:\\.|\\s*bal)|avail(?:able)?\\s*bal(?:ance)?|bal(?:ance)?|clear\\s*bal)(?:[\\sA-Za-z0-9/*#–-]{0,25}?)(?:$CURRENCY_SYM\\s*(?:is|:|–|-)?|(?:is|:|–|-)\\s*$CURRENCY_SYM?)\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
         Pattern.CASE_INSENSITIVE
     )
 
     // Available Credit Limit on Card pattern
     private val AVAILABLE_CREDIT_PATTERN = Pattern.compile(
-        "(?:avail(?:able)?\\s*(?:credit|limit)|avail\\s*lmt|avl\\s*lmt)\\s*(?:is|:|–|-)?\\s*(?:inr|rs\\.?|rs)?\\s*(?:is|:|–|-)?\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
+        "(?:avail(?:able)?\\s*(?:credit|limit)|avail\\s*lmt|avl\\s*lmt)(?:[\\sA-Za-z0-9/*#–-]{0,25}?)(?:$CURRENCY_SYM\\s*(?:is|:|–|-)?|(?:is|:|–|-)\\s*$CURRENCY_SYM?)\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
         Pattern.CASE_INSENSITIVE
     )
 
     // Total Amount Due pattern
     private val TOTAL_DUE_PATTERN = Pattern.compile(
-        "(?:total\\s*(?:amt|amount)?\\s*due|tot\\s*due).*?(?:(?:inr|rs\\.?|rs)\\s*(?:is|:|–|-)?|(?:is|:|–|-)\\s*(?:inr|rs\\.?|rs)?)\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
+        "(?:total\\s*(?:amt|amount)?\\s*due|tot\\s*due).*?(?:(?:$CURRENCY_SYM)\\s*(?:is|:|–|-)?|(?:is|:|–|-)\\s*(?:$CURRENCY_SYM)?)\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
         Pattern.CASE_INSENSITIVE
     )
 
     // Minimum Amount Due pattern
     private val MIN_DUE_PATTERN = Pattern.compile(
-        "(?:min(?:imum)?\\s*(?:amt|amount)?\\s*due).*?(?:(?:inr|rs\\.?|rs)\\s*(?:is|:|–|-)?|(?:is|:|–|-)\\s*(?:inr|rs\\.?|rs)?)\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
+        "(?:min(?:imum)?\\s*(?:amt|amount)?\\s*due).*?(?:(?:$CURRENCY_SYM)\\s*(?:is|:|–|-)?|(?:is|:|–|-)\\s*(?:$CURRENCY_SYM)?)\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
         Pattern.CASE_INSENSITIVE
     )
 
@@ -126,52 +134,89 @@ object IndianBankSmsParser {
     fun parse(sender: String?, messageBody: String): ParsedTransaction? {
         if (messageBody.isBlank()) return null
 
-        // 1. Immediately drop OTPs or Promotional spam
-        for (pattern in OTP_SPAM_PATTERNS) {
-            if (pattern.matcher(messageBody).find()) {
-                return null
-            }
+        val isMerchant = isMerchantSender(sender) || (hasMerchantKeyword(messageBody) && messageBody.contains("order", ignoreCase = true))
+
+        // 1. Strict OTP & Fraud Filter:
+        // If it explicitly asks for OTP verification and is NOT an already-completed debit/credit/withdrawal
+        val hasOtpKeyword = OTP_SPAM_PATTERNS[0].matcher(messageBody).find()
+        val isCompletedAction = messageBody.contains("debited", ignoreCase = true) ||
+                                messageBody.contains("credited", ignoreCase = true) ||
+                                messageBody.contains("withdrawn", ignoreCase = true) ||
+                                messageBody.contains("spent", ignoreCase = true) ||
+                                messageBody.contains("reversed", ignoreCase = true) ||
+                                messageBody.contains("refunded", ignoreCase = true)
+
+        if (hasOtpKeyword && !isCompletedAction) {
+            return null
         }
 
-        // 2. Extract Amount (mandatory for transactions or due statements)
-        val amount = extractAmount(messageBody) ?: extractTotalDue(messageBody) ?: extractMinDue(messageBody) ?: return null
+        // 2. Check for transactional signals
+        val hasDebitSignal = DEBIT_PATTERNS.any { it.matcher(messageBody).find() } || isMerchant
+        val hasCreditSignal = CREDIT_PATTERNS.any { it.matcher(messageBody).find() }
+        val hasTransferSignal = TRANSFER_PATTERNS.any { it.matcher(messageBody).find() }
+        val hasAtmSignal = ATM_PATTERNS.any { it.matcher(messageBody).find() }
+        val hasCardBillSignal = CARD_BILL_STATEMENT_PATTERNS.any { it.matcher(messageBody).find() }
+        val hasCardPaymentSignal = CARD_PAYMENT_PATTERNS.any { it.matcher(messageBody).find() }
 
-        // 3. Classify Financial Instrument: BANK_ACCOUNT vs CREDIT_CARD
+        val hasTransactionSignal = hasDebitSignal || hasCreditSignal || hasTransferSignal || hasAtmSignal || hasCardBillSignal || hasCardPaymentSignal
+
+        // 3. Extract Amount (mandatory for transactions or due statements)
+        val amount = extractAmount(messageBody) ?: extractTotalDue(messageBody) ?: extractMinDue(messageBody)
+
+        // 4. Safe Spam Filtering:
+        if (amount == null || !hasTransactionSignal) {
+            for (pattern in OTP_SPAM_PATTERNS) {
+                if (pattern.matcher(messageBody).find()) {
+                    return null
+                }
+            }
+            return null
+        }
+
+        // 4. Classify Financial Instrument: BANK_ACCOUNT vs CREDIT_CARD
+        // Explicitly check for Debit Card first
+        val isDebitCard = DEBIT_CARD_PATTERNS.any { it.matcher(messageBody).find() }
+
         var cardSignals = 0
         var bankSignals = 0
 
-        for (pattern in CREDIT_CARD_PATTERNS) {
-            if (pattern.matcher(messageBody).find()) cardSignals += 2
+        if (!isDebitCard) {
+            for (pattern in CREDIT_CARD_PATTERNS) {
+                if (pattern.matcher(messageBody).find()) cardSignals += 2
+            }
         }
         for (pattern in BANK_ACCOUNT_PATTERNS) {
             if (pattern.matcher(messageBody).find()) bankSignals += 2
         }
 
         val instrumentType = when {
+            isDebitCard -> FinancialInstrumentType.BANK_ACCOUNT
             cardSignals > bankSignals -> FinancialInstrumentType.CREDIT_CARD
             bankSignals > cardSignals -> FinancialInstrumentType.BANK_ACCOUNT
             else -> {
-                if (messageBody.contains("card", ignoreCase = true)) FinancialInstrumentType.CREDIT_CARD
+                if (messageBody.contains("credit", ignoreCase = true)) FinancialInstrumentType.CREDIT_CARD
                 else FinancialInstrumentType.BANK_ACCOUNT
             }
         }
 
-        // 4. Classify Direction & Kind
-        var isDebit = false
+        // 5. Classify Direction & Kind
         var isCredit = false
+        for (pattern in CREDIT_PATTERNS) {
+            if (pattern.matcher(messageBody).find()) {
+                isCredit = true
+                break
+            }
+        }
 
+        var isDebit = false
         for (pattern in DEBIT_PATTERNS) {
             if (pattern.matcher(messageBody).find()) {
                 isDebit = true
                 break
             }
         }
-
-        for (pattern in CREDIT_PATTERNS) {
-            if (pattern.matcher(messageBody).find()) {
-                isCredit = true
-                break
-            }
+        if (isMerchant && !isCredit) {
+            isDebit = true
         }
 
         // Determine Kind
@@ -180,6 +225,7 @@ object IndianBankSmsParser {
         val isCardPayment = CARD_PAYMENT_PATTERNS.any { it.matcher(messageBody).find() }
         val isAtm = ATM_PATTERNS.any { it.matcher(messageBody).find() }
         val isTransfer = TRANSFER_PATTERNS.any { it.matcher(messageBody).find() }
+        val isBillStatement = CARD_BILL_STATEMENT_PATTERNS.any { it.matcher(messageBody).find() } || TOTAL_DUE_PATTERN.matcher(messageBody).find()
 
         val direction: TransactionDirection
         val kind: TransactionKind
@@ -205,6 +251,10 @@ object IndianBankSmsParser {
                 direction = TransactionDirection.DEBIT
                 kind = TransactionKind.BANK_TRANSFER
             }
+            isBillStatement -> {
+                direction = TransactionDirection.DEBIT
+                kind = if (messageBody.contains("generated", ignoreCase = true)) TransactionKind.CARD_BILL_GENERATED else TransactionKind.CARD_BILL_DUE
+            }
             instrumentType == FinancialInstrumentType.CREDIT_CARD && isDebit -> {
                 direction = TransactionDirection.DEBIT
                 kind = TransactionKind.CARD_PURCHASE
@@ -217,14 +267,12 @@ object IndianBankSmsParser {
                 direction = TransactionDirection.DEBIT
                 kind = TransactionKind.EXPENSE
             }
+            isCredit -> {
+                direction = TransactionDirection.CREDIT
+                kind = TransactionKind.INCOME
+            }
             else -> {
-                // If it mentions Total Amt Due, statement, or CC info, treat as statement liability notice
-                if (TOTAL_DUE_PATTERN.matcher(messageBody).find() || CARD_BILL_STATEMENT_PATTERNS.any { it.matcher(messageBody).find() }) {
-                    direction = TransactionDirection.DEBIT
-                    kind = if (messageBody.contains("generated", ignoreCase = true)) TransactionKind.CARD_BILL_GENERATED else TransactionKind.CARD_BILL_DUE
-                } else {
-                    return null // Neither credit nor debit recognized
-                }
+                return null // Neither credit nor debit recognized
             }
         }
 
@@ -252,7 +300,7 @@ object IndianBankSmsParser {
         val bankName = identifyBank(sender, messageBody)
 
         // 8. Extract Merchant / Narration
-        val merchant = extractMerchant(messageBody, bankName, direction, kind)
+        val merchant = extractMerchant(messageBody, bankName, direction, kind, sender)
 
         // 9. Extract Reference / UTR
         val refNo = extractRefNumber(messageBody)
@@ -269,6 +317,7 @@ object IndianBankSmsParser {
             direction = direction,
             kind = kind,
             instrumentType = instrumentType,
+            isDebitCard = isDebitCard,
             merchant = merchant,
             bankName = bankName,
             accountNumberLast4 = accountLast4,
@@ -361,8 +410,27 @@ object IndianBankSmsParser {
         text: String,
         bankName: String,
         direction: TransactionDirection,
-        kind: TransactionKind
+        kind: TransactionKind,
+        sender: String? = null
     ): String {
+        val senderMerchant = when {
+            (sender ?: "").contains("AMAZON", ignoreCase = true) || (sender ?: "").contains("AMZN", ignoreCase = true) -> "Amazon"
+            (sender ?: "").contains("SWIGGY", ignoreCase = true) -> "Swiggy"
+            (sender ?: "").contains("ZOMATO", ignoreCase = true) || (sender ?: "").contains("ZOMTO", ignoreCase = true) -> "Zomato"
+            (sender ?: "").contains("FLIPKART", ignoreCase = true) || (sender ?: "").contains("FLPKRT", ignoreCase = true) -> "Flipkart"
+            (sender ?: "").contains("UBER", ignoreCase = true) -> "Uber"
+            (sender ?: "").contains("OLA", ignoreCase = true) -> "Ola"
+            (sender ?: "").contains("MYNTRA", ignoreCase = true) -> "Myntra"
+            (sender ?: "").contains("ZEPTO", ignoreCase = true) -> "Zepto"
+            (sender ?: "").contains("BLINKIT", ignoreCase = true) -> "Blinkit"
+            (sender ?: "").contains("BIGBSK", ignoreCase = true) -> "BigBasket"
+            (sender ?: "").contains("CRED", ignoreCase = true) -> "CRED"
+            else -> null
+        }
+        if (senderMerchant != null) {
+            return senderMerchant
+        }
+
         for (pattern in MERCHANT_PATTERNS) {
             val matcher = pattern.matcher(text)
             while (matcher.find()) {
@@ -372,13 +440,26 @@ object IndianBankSmsParser {
                     !candidate.contains("card", true) && !candidate.contains("account", true) &&
                     !candidate.contains("a/c", true) && !candidate.contains("bank", true) &&
                     !candidate.contains("your", true) && !candidate.contains("avail", true) &&
-                    !candidate.contains("bal", true)
+                    !candidate.contains("bal", true) &&
+                    !candidate.matches(Regex("^[0-9]{1,2}\\s+[A-Za-z]{3,4}$", RegexOption.IGNORE_CASE)) &&
+                    !candidate.matches(Regex("^[0-9]{1,4}[-/][0-9]{1,2}[-/][0-9]{2,4}$"))
                 ) {
                     if (candidate.contains("salary", true)) {
                         return "Salary / Payroll"
                     }
                     return cleanMerchantName(candidate)
                 }
+            }
+        }
+
+        val knownMerchants = listOf(
+            "Amazon", "Swiggy", "Zomato", "Flipkart", "Uber", "Ola", "Myntra",
+            "Zepto", "Blinkit", "BigBasket", "Paytm", "CRED", "Dominos", "Netflix", "Spotify"
+        )
+        for (km in knownMerchants) {
+            val kmPattern = Pattern.compile("\\b" + Pattern.quote(km) + "\\b", Pattern.CASE_INSENSITIVE)
+            if (kmPattern.matcher(text).find() || (sender ?: "").contains(km, ignoreCase = true)) {
+                return km
             }
         }
 
@@ -415,22 +496,58 @@ object IndianBankSmsParser {
             }
     }
 
-    private fun identifyBank(sender: String?, text: String): String {
+    fun identifyBank(sender: String?, text: String): String {
         val combined = "${sender ?: ""} $text".uppercase()
         return when {
+            combined.contains("KOTAK") || combined.contains("KMBL") || combined.contains("KMB") -> "Kotak Bank"
             combined.contains("HDFC") -> "HDFC Bank"
             combined.contains("SBI") || combined.contains("SBIN") -> "State Bank of India"
             combined.contains("ICICI") -> "ICICI Bank"
             combined.contains("AXIS") || combined.contains("UTIB") -> "Axis Bank"
-            combined.contains("KOTAK") -> "Kotak Bank"
             combined.contains("PNB") || combined.contains("PUNB") -> "Punjab National Bank"
             combined.contains("BOB") || combined.contains("BARB") -> "Bank of Baroda"
             combined.contains("CANARA") || combined.contains("CNRB") -> "Canara Bank"
             combined.contains("INDUS") || combined.contains("INDB") -> "IndusInd Bank"
-            combined.contains("PAYTM") -> "Paytm Payments Bank"
+            combined.contains("PAYTM") || combined.contains("PYTM") -> "Paytm Payments Bank"
             combined.contains("IDFC") -> "IDFC FIRST Bank"
             combined.contains("YES") || combined.contains("YESB") -> "YES Bank"
+            combined.contains("FEDERAL") || combined.contains("FDRL") -> "Federal Bank"
+            combined.contains("UNION") || combined.contains("UBIN") -> "Union Bank of India"
+            combined.contains("RBL") || combined.contains("RATN") -> "RBL Bank"
+            combined.contains("CITI") -> "Citibank"
+            combined.contains("SCB") || combined.contains("STANCHAR") -> "Standard Chartered"
+            combined.contains("AU") || combined.contains("AUBANK") -> "AU Small Finance Bank"
             else -> "Bank"
         }
     }
+
+    private val MERCHANT_KEYWORD_PATTERN = Pattern.compile(
+        "\\b(?:amazon|amzn|swiggy|zomato|flipkart|uber|myntra|zepto|blinkit|bigbasket|cred|ola|dominos|netflix|spotify)\\b",
+        Pattern.CASE_INSENSITIVE
+    )
+
+    fun hasMerchantKeyword(text: String): Boolean {
+        return MERCHANT_KEYWORD_PATTERN.matcher(text).find()
+    }
+
+    fun isMerchantSender(sender: String?): Boolean {
+        val s = (sender ?: "").uppercase()
+        return s.contains("AMAZON") || s.contains("AMZN") ||
+               s.contains("SWIGGY") || s.contains("SWGGY") ||
+               s.contains("ZOMATO") || s.contains("ZOMTO") ||
+               s.contains("FLIPKART") || s.contains("FLPKRT") || s.contains("FLIPKT") ||
+               s.contains("UBER") || s.contains("MYNTRA") ||
+               s.contains("ZEPTO") || s.contains("BLINKIT") ||
+               s.contains("BIGBSK") || s.contains("CRED") || s.contains("OLA")
+    }
+
+    fun isBankSender(sender: String?): Boolean {
+        val s = (sender ?: "").uppercase()
+        return s.contains("KOTAK") || s.contains("HDFC") || s.contains("SBI") ||
+               s.contains("ICICI") || s.contains("AXIS") || s.contains("PNB") ||
+               s.contains("BOB") || s.contains("CAN") || s.contains("INDUS") ||
+               s.contains("IDFC") || s.contains("YES") || s.contains("FDRL") ||
+               s.contains("UBIN") || s.contains("RBL") || s.contains("PAYTM")
+    }
 }
+

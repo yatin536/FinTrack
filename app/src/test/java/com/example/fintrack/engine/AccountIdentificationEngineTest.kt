@@ -132,4 +132,63 @@ class AccountIdentificationEngineTest {
         assertTrue("Ambiguous account must flag needsReview", result.needsReview)
         assertTrue("Confidence should be below review threshold", result.confidence < 0.70)
     }
+
+    @Test
+    fun testDebitCardMatchedToBankByBankName() {
+        val kotakAccount = Account(
+            id = "kotak_bank_1",
+            name = "Kotak Savings",
+            bankName = "Kotak Bank",
+            accountType = AccountType.BANK_ACCOUNT,
+            accountNumberLast4 = "9876",
+            currentBalance = 15200.0
+        )
+        val testAccounts = listOf(kotakAccount, iciciCard)
+
+        val raw = "Kotak Bank: INR 850 spent on Debit Card ending 4321 at DOMINOS"
+        val parsed = ParsedTransaction(
+            amount = 850.0,
+            direction = TransactionDirection.DEBIT,
+            kind = TransactionKind.EXPENSE,
+            instrumentType = FinancialInstrumentType.BANK_ACCOUNT,
+            isDebitCard = true,
+            bankName = "Kotak Bank",
+            accountNumberLast4 = "4321",
+            merchant = "Dominos",
+            rawSender = "VK-KOTAKB",
+            rawBody = raw
+        )
+
+        val result = engine.identifyAccount(parsed, "VK-KOTAKB", raw, testAccounts, emptyList())
+
+        assertNotNull("Debit card must resolve to the user's Kotak bank account", result.account)
+        assertEquals("kotak_bank_1", result.account?.id)
+        assertFalse("Debit card matching should not require review", result.needsReview)
+        assertTrue("Confidence must be >= 0.90", result.confidence >= 0.90)
+    }
+
+    @Test
+    fun testSoleBankAccountAutoResolution() {
+        // User has only 1 bank account (HDFC) and 1 credit card (ICICI)
+        val raw = "INR 300 debited from HDFC Bank towards Uber"
+        val parsed = ParsedTransaction(
+            amount = 300.0,
+            direction = TransactionDirection.DEBIT,
+            kind = TransactionKind.EXPENSE,
+            instrumentType = FinancialInstrumentType.BANK_ACCOUNT,
+            bankName = "HDFC Bank",
+            accountNumberLast4 = "",
+            merchant = "Uber",
+            rawSender = "VK-HDFCBK",
+            rawBody = raw
+        )
+
+        val result = engine.identifyAccount(parsed, "VK-HDFCBK", raw, accounts, emptyList())
+
+        assertNotNull(result.account)
+        assertEquals("hdfc_bank_1", result.account?.id)
+        assertFalse("Inferred sole bank account must not require review", result.needsReview)
+        assertTrue(result.confidence >= 0.90)
+    }
 }
+

@@ -152,4 +152,62 @@ class IndianBankSmsParserTest {
         val promoParsed = IndianBankSmsParser.parse("AD-LOAN", promoSms)
         assertNull("Promotional spam must be rejected", promoParsed)
     }
+
+    @Test
+    fun testRupeeSymbolParsing() {
+        val sms = "Debited ₹450.00 from Kotak Bank A/c **1234 on 12-Oct-26 to VPA swiggy@icici (UPI Ref: 426189). Avl Bal: ₹18,500.00"
+        val parsed = IndianBankSmsParser.parse("VK-KOTAKB", sms)
+
+        assertNotNull(parsed)
+        parsed!!
+        assertEquals(450.0, parsed.amount, 0.001)
+        assertEquals(TransactionDirection.DEBIT, parsed.direction)
+        assertEquals("Kotak Bank", parsed.bankName)
+        assertEquals("1234", parsed.accountNumberLast4)
+        assertEquals("Swiggy", parsed.merchant)
+        assertEquals(18500.0, parsed.availableBalance!!, 0.001)
+        assertEquals(FinancialInstrumentType.BANK_ACCOUNT, parsed.instrumentType)
+    }
+
+    @Test
+    fun testDebitCardClassification() {
+        val sms = "Kotak Bank: INR 850 spent on Debit Card ending 4321 at DOMINOS. Avl bal in A/c 9876 is INR 15,200."
+        val parsed = IndianBankSmsParser.parse("VK-KOTAKB", sms)
+
+        assertNotNull(parsed)
+        parsed!!
+        assertEquals(850.0, parsed.amount, 0.001)
+        assertEquals(TransactionDirection.DEBIT, parsed.direction)
+        assertEquals("Kotak Bank", parsed.bankName)
+        assertEquals("4321", parsed.accountNumberLast4)
+        assertEquals(FinancialInstrumentType.BANK_ACCOUNT, parsed.instrumentType)
+        assertTrue("isDebitCard must be true", parsed.isDebitCard)
+        assertEquals(15200.0, parsed.availableBalance!!, 0.001)
+    }
+
+    @Test
+    fun testDebitSmsWithFraudFooterPreserved() {
+        val sms = "Rs 500.00 debited from A/c XX1234 towards Amazon. Avl bal Rs 12,000. If not done by you, click here to report fraud. Never share your OTP with anyone."
+        val parsed = IndianBankSmsParser.parse("VK-HDFCBK", sms)
+
+        assertNotNull("Real debit SMS with security disclaimer footer must NOT be dropped", parsed)
+        parsed!!
+        assertEquals(500.0, parsed.amount, 0.001)
+        assertEquals(TransactionDirection.DEBIT, parsed.direction)
+        assertEquals("Amazon", parsed.merchant)
+        assertEquals(12000.0, parsed.availableBalance!!, 0.001)
+    }
+
+    @Test
+    fun testDebitSmsWithPromotionalFooterPreserved() {
+        val sms = "Rs 1,500.00 debited from A/c 1234 towards Swiggy. Apply now for pre-approved personal loan."
+        val parsed = IndianBankSmsParser.parse("VK-HDFCBK", sms)
+
+        assertNotNull("Debit SMS with promotional footer must NOT be dropped", parsed)
+        parsed!!
+        assertEquals(1500.0, parsed.amount, 0.001)
+        assertEquals(TransactionDirection.DEBIT, parsed.direction)
+        assertEquals("Swiggy", parsed.merchant)
+    }
 }
+

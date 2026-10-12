@@ -14,6 +14,7 @@ data class ParsedTransaction(
     val direction: TransactionDirection,
     val kind: TransactionKind = TransactionKind.EXPENSE,
     val instrumentType: FinancialInstrumentType = FinancialInstrumentType.BANK_ACCOUNT,
+    val isDebitCard: Boolean = false,
     val merchant: String,
     val bankName: String,
     val accountNumberLast4: String,
