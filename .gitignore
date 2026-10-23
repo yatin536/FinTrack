@@ -13,3 +13,5 @@ keystore.properties
 keystore/
 powershell.bat
 cmd.bat
+*.apk
+*.aab

@@ -3,6 +3,7 @@ package com.example.fintrack.ui.profile
 import android.content.Context
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -48,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -57,7 +59,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import com.example.fintrack.data.local.GlassThemePreset
 import com.example.fintrack.data.local.PinManager
+import com.example.fintrack.data.local.ThemeMode
+import com.example.fintrack.data.local.ThemePreferenceManager
 import com.example.fintrack.data.model.AuditLog
 import com.example.fintrack.data.model.MessageRule
 import com.example.fintrack.data.model.User
@@ -72,15 +77,21 @@ import java.util.Locale
 @Composable
 fun ProfileSettingsScreen(
     repository: TransactionRepository,
+    themeManager: ThemePreferenceManager? = null,
     onUserSwitched: () -> Unit,
     onNavigateToAccounts: () -> Unit = {},
     onLogout: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val actualThemeManager = remember(themeManager) { themeManager ?: ThemePreferenceManager(context) }
     val fragmentActivity = context as? FragmentActivity
     val pinManager = remember { PinManager(context) }
     val scope = rememberCoroutineScope()
+
+    val currentThemeMode by actualThemeManager.themeMode.collectAsState()
+    val currentGlassPreset by actualThemeManager.glassPreset.collectAsState()
+    val currentCurrencySymbol by actualThemeManager.currencySymbol.collectAsState()
 
     val activeUser by repository.getActiveUserFlow().collectAsState(initial = null)
     var users by remember { mutableStateOf<List<User>>(emptyList()) }
@@ -406,6 +417,245 @@ fun ProfileSettingsScreen(
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+        }
+
+        // App Theme & Appearance Card
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Header
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = AppIcons.Settings,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Column {
+                            Text(
+                                text = "App Theme & Appearance",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Aurora glassmorphic styling & currency format",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    // Mode Toggle (System, Dark, Light)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Color Mode",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(ThemeMode.DARK, ThemeMode.LIGHT, ThemeMode.SYSTEM).forEach { mode ->
+                                val isSelected = currentThemeMode == mode
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { actualThemeManager.setThemeMode(mode) }
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.padding(vertical = 10.dp)
+                                    ) {
+                                        Text(
+                                            text = when (mode) {
+                                                ThemeMode.DARK -> "Dark"
+                                                ThemeMode.LIGHT -> "Light"
+                                                ThemeMode.SYSTEM -> "System"
+                                            },
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2x2 Glass Preset Grid
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Aurora Glass Preset",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        val presets = listOf(
+                            Triple(
+                                GlassThemePreset.MIDNIGHT_GLASS,
+                                "Midnight Glass",
+                                listOf(Color(0xFF00E5FF), Color(0xFF6366F1))
+                            ),
+                            Triple(
+                                GlassThemePreset.AURO_GLASS,
+                                "Auro Glass",
+                                listOf(Color(0xFFC084FC), Color(0xFF38BDF8))
+                            ),
+                            Triple(
+                                GlassThemePreset.SUNSET_GLOW,
+                                "Sunset Glow",
+                                listOf(Color(0xFFFF6B81), Color(0xFFFFA502))
+                            ),
+                            Triple(
+                                GlassThemePreset.EMERALD_CALM,
+                                "Emerald Calm",
+                                listOf(Color(0xFF34D399), Color(0xFF2DD4BF))
+                            )
+                        )
+
+                        for (row in presets.chunked(2)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                for ((preset, name, gradientColors) in row) {
+                                    val isPresetSelected = currentGlassPreset == preset
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (isPresetSelected) {
+                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                        } else {
+                                            MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
+                                        },
+                                        border = BorderStroke(
+                                            width = if (isPresetSelected) 1.5.dp else 1.dp,
+                                            color = if (isPresetSelected) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                            }
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { actualThemeManager.setGlassPreset(preset) }
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(22.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Brush.linearGradient(gradientColors))
+                                                )
+                                                if (isPresetSelected) {
+                                                    Icon(
+                                                        imageVector = AppIcons.CheckCircle,
+                                                        contentDescription = "Selected",
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                            Column {
+                                                Text(
+                                                    text = name,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = if (isPresetSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Text(
+                                                    text = preset.subtitle,
+                                                    fontSize = 10.sp,
+                                                    maxLines = 2,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    lineHeight = 12.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Currency Symbol Selector
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Display Currency",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val currencies = listOf("₹" to "INR (₹)", "$" to "USD ($)")
+                            currencies.forEach { (symbol, label) ->
+                                val isSelected = currentCurrencySymbol == symbol
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { actualThemeManager.setCurrencySymbol(symbol) }
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.padding(vertical = 10.dp)
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontSize = 13.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

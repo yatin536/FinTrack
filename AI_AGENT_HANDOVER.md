@@ -1,10 +1,10 @@
 # FinTrack — Complete Engineering Handover & AI Agent Guide
 
-> **Document Version:** 3.0 (Post-Multi-User & Dual-Message Correlation Upgrade)  
+> **Document Version:** 4.0 (FinTrack v2.3 — Aurora Pastel Glassmorphic, Exact Money Arithmetic, PBKDF2 & Database v7 Schema Upgrade)  
 > **Target Audience:** Next AI Coding Agent / Senior Android Systems Engineer  
-> **Project Scope:** Native Android Personal Finance & Expense Intelligence System  
-> **Security Posture:** Air-Gapped, 100% Offline, Zero Network Permissions, Hardware AES-256-GCM Encryption  
-> **Status:** Production-Ready, Tested (50/50 Tests Passing), Deployed on Physical Device  
+> **Project Scope:** Native Android Personal Finance & Expense Intelligence System (versionCode = 5, versionName = "2.3")  
+> **Security Posture:** Air-Gapped, 100% Offline, Zero Network Permissions, Hardware AES-256-GCM Encryption, PBKDF2 (120,000 iterations)  
+> **Status:** Production-Ready, Tested (66/66 Unit Tests Passing), Deployed on Physical Device  
 
 ---
 
@@ -531,13 +531,17 @@ The test suite consists of **50 comprehensive unit tests** across 9 test classes
 ### 6.4 Regression Checklist for Future Agents
 
 Before committing any future modifications, run this verification checklist:
-- [ ] `.\gradlew.bat testDebugUnitTest` passes 100% (50/50 tests).
+- [ ] `.\gradlew.bat testDebugUnitTest` passes 100% (66/66 tests).
+- [ ] Monetary arithmetic uses `Money` (integer paise `Long` & `BigDecimal` scale 2) without IEEE 754 floating-point drift.
+- [ ] `PinManager` uses PBKDF2 with 120,000 iterations, transparent auto-migration from legacy SHA-256, and monotonic elapsed lockout.
+- [ ] `SecurityManager` decrypt throws `SecurityException` on corrupted ciphertext without silent fallback to plaintext.
 - [ ] `IndianBankSmsParser.isMerchantSender(sender)` only inspects sender IDs (never raw message body, preventing `CRED` from matching `CREDITED`).
 - [ ] `MERCHANT_PATTERNS` in `extractMerchant` executes **before** fallback `knownMerchants` (preventing truncation of "Amazon India" to "Amazon").
 - [ ] Correlated multi-message alerts deduct the ledger balance **exactly once**.
 - [ ] Debit cards are classified under `FinancialInstrumentType.BANK_ACCOUNT`, never `CREDIT_CARD`.
 - [ ] Statement bill alerts (`CARD_BILL_DUE` / `CARD_BILL_GENERATED`) never set `billStatus = PAID`.
-- [ ] Release APK compiles cleanly with `.\gradlew.bat assembleRelease`.
+- [ ] SQLite database is at `DATABASE_VERSION = 7` with non-destructive migrations.
+- [ ] Debug APK compiles cleanly with `.\gradlew.bat assembleDebug` and release with `.\gradlew.bat assembleRelease`.
 
 ---
 

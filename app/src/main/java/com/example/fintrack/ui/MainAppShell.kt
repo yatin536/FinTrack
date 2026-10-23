@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.fintrack.data.local.PinManager
+import com.example.fintrack.data.local.ThemePreferenceManager
 import com.example.fintrack.data.model.Account
 import com.example.fintrack.data.model.AccountType
 import com.example.fintrack.data.model.BankAccountType
@@ -75,10 +76,12 @@ enum class AppTab {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainAppShell(
+    themeManager: ThemePreferenceManager? = null,
     isDark: Boolean = true,
     onToggleDarkMode: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val actualThemeManager = remember(themeManager) { themeManager ?: ThemePreferenceManager(context) }
     val repository = remember { TransactionRepository(context) }
     val pinManager = remember { PinManager(context) }
     val coroutineScope = rememberCoroutineScope()
@@ -380,6 +383,7 @@ fun MainAppShell(
                         currentTab == AppTab.PROFILE -> {
                             ProfileSettingsScreen(
                                 repository = repository,
+                                themeManager = actualThemeManager,
                                 onUserSwitched = {
                                     userRefreshTrigger++
                                     coroutineScope.launch {

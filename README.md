@@ -1,12 +1,13 @@
 # FinTrack 🛡️💳
 ### Privacy-First, Air-Gapped Personal Finance & Expense Intelligence System for Android
 
+[![Version](https://img.shields.io/badge/Version-2.3-green.svg)](https://github.com/yatin536/FinTrack)
 [![Kotlin Version](https://img.shields.io/badge/Kotlin-2.3.20-7F52FF.svg?logo=kotlin)](https://kotlinlang.org)
-[![Android Gradle Plugin](https://img.shields.io/badge/AGP-9.0.1-3DDC84.svg?logo=android)](https://developer.android.com/studio/releases/gradle-plugin)
+[![Android Gradle Plugin](https://img.shields.io/badge/AGP-9.4.1-3DDC84.svg?logo=android)](https://developer.android.com/studio/releases/gradle-plugin)
 [![Compose Material 3](https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4.svg?logo=jetpackcompose)](https://developer.android.com/jetpack/compose)
 [![Security](https://img.shields.io/badge/Encryption-AES--256--GCM-10B981.svg)](https://developer.android.com/reference/androidx/security/crypto/EncryptedFile)
 [![Air-Gapped](https://img.shields.io/badge/Network_Permission-NONE_(Offline)-0A192F.svg)](AndroidManifest.xml)
-[![License](https://img.shields.io/badge/License-Proprietary-blue.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-66%20Passed-brightgreen.svg)](#)
 
 ---
 
@@ -179,7 +180,7 @@ FinTrack/
 git clone https://github.com/yatin536/FinTrack.git
 cd FinTrack
 
-# Run unit tests (40 passing tests)
+# Run unit tests (66 passing tests)
 ./gradlew testDebugUnitTest
 
 # Assemble production release APK

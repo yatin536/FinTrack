@@ -14,6 +14,7 @@ data class User(
     val colorHex: Long = 0xFF2563EB,
     val isActive: Boolean = true,
     val isBiometricEnabled: Boolean = false,
+    val pinKdfVersion: Int = 1,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 ) {

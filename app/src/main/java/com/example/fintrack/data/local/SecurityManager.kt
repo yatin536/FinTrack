@@ -2,9 +2,9 @@ package com.example.fintrack.data.local
 
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.util.Base64
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
+import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -71,12 +71,11 @@ object SecurityManager {
             val iv = cipher.iv
             val cipherText = cipher.doFinal(plainText.toByteArray(StandardCharsets.UTF_8))
 
-            val ivString = Base64.encodeToString(iv, Base64.NO_WRAP)
-            val cipherString = Base64.encodeToString(cipherText, Base64.NO_WRAP)
+            val ivString = Base64.getEncoder().encodeToString(iv)
+            val cipherString = Base64.getEncoder().encodeToString(cipherText)
             "$ivString:$cipherString"
         } catch (e: Exception) {
-            // In case of any encryption issue, do not store corrupted data
-            plainText
+            throw SecurityException("SecurityManager encryption failed", e)
         }
     }
 
@@ -93,8 +92,8 @@ object SecurityManager {
             val parts = encryptedString.split(":")
             if (parts.size != 2) return encryptedString
 
-            val iv = Base64.decode(parts[0], Base64.NO_WRAP)
-            val cipherText = Base64.decode(parts[1], Base64.NO_WRAP)
+            val iv = Base64.getDecoder().decode(parts[0])
+            val cipherText = Base64.getDecoder().decode(parts[1])
 
             val cipher = Cipher.getInstance(TRANSFORMATION)
             val spec = GCMParameterSpec(GCM_TAG_LENGTH, iv)
@@ -103,7 +102,7 @@ object SecurityManager {
             val plainBytes = cipher.doFinal(cipherText)
             String(plainBytes, StandardCharsets.UTF_8)
         } catch (e: Exception) {
-            encryptedString
+            throw SecurityException("SecurityManager decryption failed: corrupted ciphertext or invalid key", e)
         }
     }
 

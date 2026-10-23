@@ -31,6 +31,8 @@ import com.example.fintrack.data.model.VerificationStatus
 import com.example.fintrack.data.model.MessageRule
 import com.example.fintrack.data.model.MessageRuleAction
 import com.example.fintrack.data.model.MessageRuleStatus
+import com.example.fintrack.data.model.Money
+import com.example.fintrack.data.model.sumMoney
 import com.example.fintrack.data.model.TransactionStatus
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -51,7 +53,7 @@ class AppDatabaseHelper(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "fintrack_secure.db"
-        const val DATABASE_VERSION = 6
+        const val DATABASE_VERSION = 7
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -83,6 +85,7 @@ class AppDatabaseHelper(context: Context) :
         const val COL_USER_COLOR = "color_hex"
         const val COL_USER_IS_ACTIVE = "is_active"
         const val COL_USER_BIOMETRIC = "biometric_enabled"
+        const val COL_USER_PIN_KDF_VERSION = "pin_kdf_version"
         const val COL_USER_CREATED = "created_at"
         const val COL_USER_UPDATED = "updated_at"
 
@@ -242,6 +245,7 @@ class AppDatabaseHelper(context: Context) :
                 $COL_USER_COLOR INTEGER NOT NULL,
                 $COL_USER_IS_ACTIVE INTEGER NOT NULL DEFAULT 1,
                 $COL_USER_BIOMETRIC INTEGER NOT NULL DEFAULT 0,
+                $COL_USER_PIN_KDF_VERSION INTEGER NOT NULL DEFAULT 1,
                 $COL_USER_CREATED INTEGER NOT NULL,
                 $COL_USER_UPDATED INTEGER NOT NULL DEFAULT 0
             )
@@ -668,6 +672,10 @@ class AppDatabaseHelper(context: Context) :
                 )
             }
 
+            if (oldVersion < 7) {
+                addColumnIfNotExists(db, TABLE_USERS, COL_USER_PIN_KDF_VERSION, "INTEGER NOT NULL DEFAULT 1")
+            }
+
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -825,7 +833,7 @@ class AppDatabaseHelper(context: Context) :
      */
     fun getNetTransactions(accountId: String, accountType: AccountType): Double {
         val db = readableDatabase
-        var net = 0.0
+        var netPaise = 0L
         val cursor = db.query(
             TABLE_TRANSACTIONS,
             null,
@@ -870,26 +878,27 @@ class AppDatabaseHelper(context: Context) :
                 val sourceAcc = c.getString(sourceIdx)
                 val destAcc = c.getString(destIdx)
                 val primaryAcc = c.getString(accIdx)
-                val amount = SecurityManager.decryptDouble(encryptedAmount, 0.0)
+                val amountDouble = SecurityManager.decryptDouble(encryptedAmount, 0.0)
+                val amountPaise = Money.fromDouble(amountDouble).paise
 
                 if (accountType == AccountType.CREDIT_CARD) {
                     when (kind) {
                         TransactionKind.CARD_PURCHASE, TransactionKind.EXPENSE -> {
                             if (primaryAcc == accountId || destAcc == accountId || sourceAcc == accountId) {
-                                net += amount // Increases outstanding
+                                netPaise += amountPaise // Increases outstanding
                             }
                         }
                         TransactionKind.CARD_PAYMENT -> {
                             // Payment towards this credit card decreases outstanding
                             if (destAcc == accountId || primaryAcc == accountId) {
-                                net -= amount
+                                netPaise -= amountPaise
                             }
                         }
                         TransactionKind.REFUND, TransactionKind.REVERSAL -> {
-                            net -= amount // Reduces outstanding
+                            netPaise -= amountPaise // Reduces outstanding
                         }
                         else -> {
-                            if (type == TransactionDirection.DEBIT.name) net += amount else net -= amount
+                            if (type == TransactionDirection.DEBIT.name) netPaise += amountPaise else netPaise -= amountPaise
                         }
                     }
                 } else {
@@ -897,33 +906,33 @@ class AppDatabaseHelper(context: Context) :
                     when (kind) {
                         TransactionKind.BANK_TRANSFER -> {
                             if (sourceAcc == accountId) {
-                                net -= amount // Money sent out
+                                netPaise -= amountPaise // Money sent out
                             } else if (destAcc == accountId) {
-                                net += amount // Money received
+                                netPaise += amountPaise // Money received
                             }
                         }
                         TransactionKind.CARD_PAYMENT -> {
                             if (sourceAcc == accountId) {
-                                net -= amount // Bank paid CC bill
+                                netPaise -= amountPaise // Bank paid CC bill
                             }
                         }
                         TransactionKind.INCOME, TransactionKind.CASH_DEPOSIT, TransactionKind.REFUND -> {
-                            net += amount
+                            netPaise += amountPaise
                         }
                         TransactionKind.EXPENSE, TransactionKind.ATM_WITHDRAWAL, TransactionKind.CASH_WITHDRAWAL -> {
-                            net -= amount
+                            netPaise -= amountPaise
                         }
                         TransactionKind.REVERSAL -> {
-                            if (type == TransactionDirection.CREDIT.name) net += amount else net -= amount
+                            if (type == TransactionDirection.CREDIT.name) netPaise += amountPaise else netPaise -= amountPaise
                         }
                         else -> {
-                            if (type == TransactionDirection.CREDIT.name) net += amount else net -= amount
+                            if (type == TransactionDirection.CREDIT.name) netPaise += amountPaise else netPaise -= amountPaise
                         }
                     }
                 }
             }
         }
-        return net
+        return Money.fromPaise(netPaise).asDouble
     }
 
     /**
@@ -1098,7 +1107,9 @@ class AppDatabaseHelper(context: Context) :
 
     private fun calculateAccountBalance(accountId: String, accountType: AccountType, initialBalance: Double): Double {
         val net = getNetTransactions(accountId, accountType)
-        return initialBalance + net
+        val initialPaise = Money.fromDouble(initialBalance).paise
+        val netPaise = Money.fromDouble(net).paise
+        return Money.fromPaise(initialPaise + netPaise).asDouble
     }
 
     // ==========================================
@@ -2170,48 +2181,34 @@ class AppDatabaseHelper(context: Context) :
     fun getDashboardSummary(period: TimePeriod, userId: String = User.DEFAULT_USER_ID): DashboardSummary {
         val accounts = getAccounts(userId)
         // Bank/Cash Assets
-        val totalBankBalance = accounts.filter { it.accountType != AccountType.CREDIT_CARD }.sumOf { it.currentBalance }
+        val totalBankBalance = accounts.filter { it.accountType != AccountType.CREDIT_CARD }
+            .map { it.currentBalanceMoney }.sumMoney().asDouble
         // Credit Card Liabilities (Outstanding)
-        val totalCreditCardOutstanding = accounts.filter { it.accountType == AccountType.CREDIT_CARD }.sumOf { it.currentBalance }
+        val totalCreditCardOutstanding = accounts.filter { it.accountType == AccountType.CREDIT_CARD }
+            .map { it.currentBalanceMoney }.sumMoney().asDouble
         // Net Worth = Assets - Liabilities
         val netWorth = totalBankBalance - totalCreditCardOutstanding
 
         val categories = getCategories().associateBy { it.id }
 
-        val cal = Calendar.getInstance()
-        val now = cal.timeInMillis
+        val zoneId = try { java.time.ZoneId.systemDefault() } catch (_: Throwable) { java.time.ZoneId.of("Asia/Kolkata") }
+        val today = java.time.LocalDate.now(zoneId)
+        val now = System.currentTimeMillis()
 
-        // Determine start timestamp based on period
-        when (period) {
-            TimePeriod.DAILY -> {
-                cal.set(Calendar.HOUR_OF_DAY, 0)
-                cal.set(Calendar.MINUTE, 0)
-                cal.set(Calendar.SECOND, 0)
-                cal.set(Calendar.MILLISECOND, 0)
-            }
-            TimePeriod.MONTHLY -> {
-                cal.set(Calendar.DAY_OF_MONTH, 1)
-                cal.set(Calendar.HOUR_OF_DAY, 0)
-                cal.set(Calendar.MINUTE, 0)
-                cal.set(Calendar.SECOND, 0)
-                cal.set(Calendar.MILLISECOND, 0)
-            }
-            TimePeriod.YEARLY -> {
-                cal.set(Calendar.DAY_OF_YEAR, 1)
-                cal.set(Calendar.HOUR_OF_DAY, 0)
-                cal.set(Calendar.MINUTE, 0)
-                cal.set(Calendar.SECOND, 0)
-                cal.set(Calendar.MILLISECOND, 0)
-            }
+        // Determine start timestamp based on period with exact local ZoneId
+        val startPeriodTimestamp = when (period) {
+            TimePeriod.DAILY -> today.atStartOfDay(zoneId).toInstant().toEpochMilli()
+            TimePeriod.WEEKLY -> today.minusDays(6).atStartOfDay(zoneId).toInstant().toEpochMilli()
+            TimePeriod.MONTHLY -> today.withDayOfMonth(1).atStartOfDay(zoneId).toInstant().toEpochMilli()
+            TimePeriod.YEARLY -> today.withDayOfYear(1).atStartOfDay(zoneId).toInstant().toEpochMilli()
         }
-        val startPeriodTimestamp = cal.timeInMillis
 
         val allTxns = getTransactionsWithDetails(limit = 500)
         val periodTxns = allTxns.filter { it.transaction.timestamp in startPeriodTimestamp..now }
 
-        var periodIncome = 0.0
-        var periodExpense = 0.0
-        val categoryTotals = mutableMapOf<String, Double>()
+        var periodIncomePaise = 0L
+        var periodExpensePaise = 0L
+        val categoryTotalsPaise = mutableMapOf<String, Long>()
 
         for (item in periodTxns) {
             val txn = item.transaction
@@ -2220,21 +2217,26 @@ class AppDatabaseHelper(context: Context) :
                 continue
             }
 
+            val amountPaise = txn.amountMoney.paise
             if (txn.direction == TransactionDirection.CREDIT && txn.kind != TransactionKind.REFUND && txn.kind != TransactionKind.REVERSAL) {
-                periodIncome += txn.amount
+                periodIncomePaise += amountPaise
             } else if (txn.kind == TransactionKind.EXPENSE || txn.kind == TransactionKind.CARD_PURCHASE || txn.kind == TransactionKind.ATM_WITHDRAWAL) {
-                periodExpense += txn.amount
-                val current = categoryTotals[txn.categoryId] ?: 0.0
-                categoryTotals[txn.categoryId] = current + txn.amount
+                periodExpensePaise += amountPaise
+                val current = categoryTotalsPaise[txn.categoryId] ?: 0L
+                categoryTotalsPaise[txn.categoryId] = current + amountPaise
             } else if (txn.kind == TransactionKind.REFUND || txn.kind == TransactionKind.REVERSAL) {
                 // Refunds/reversals reduce expenses
-                periodExpense = maxOf(0.0, periodExpense - txn.amount)
+                periodExpensePaise = maxOf(0L, periodExpensePaise - amountPaise)
             }
         }
 
-        val categorySpends = categoryTotals.mapNotNull { (catId, sum) ->
+        val periodIncome = Money.fromPaise(periodIncomePaise).asDouble
+        val periodExpense = Money.fromPaise(periodExpensePaise).asDouble
+
+        val categorySpends = categoryTotalsPaise.mapNotNull { (catId, sumPaise) ->
             val cat = categories[catId] ?: return@mapNotNull null
-            val pct = if (periodExpense > 0) ((sum / periodExpense) * 100).toFloat() else 0f
+            val sum = Money.fromPaise(sumPaise).asDouble
+            val pct = if (periodExpensePaise > 0L) ((sumPaise.toFloat() / periodExpensePaise.toFloat()) * 100f) else 0f
             CategorySpend(cat, sum, pct)
         }.sortedByDescending { it.totalAmount }
 
@@ -2277,31 +2279,46 @@ class AppDatabaseHelper(context: Context) :
         transactions: List<TransactionWithDetails>
     ): List<TrendPoint> {
         val points = mutableListOf<TrendPoint>()
+        val zoneId = try { java.time.ZoneId.systemDefault() } catch (_: Throwable) { java.time.ZoneId.of("Asia/Kolkata") }
+        val today = java.time.LocalDate.now(zoneId)
 
         when (period) {
             TimePeriod.DAILY -> {
+                val quadrants = listOf(
+                    "Night" to (0 to 6),
+                    "Morning" to (6 to 12),
+                    "Afternoon" to (12 to 18),
+                    "Evening" to (18 to 24)
+                )
+                val dayStart = today.atStartOfDay(zoneId).toInstant().toEpochMilli()
+                for ((label, range) in quadrants) {
+                    val qStart = dayStart + (range.first * 60 * 60 * 1000L)
+                    val qEnd = dayStart + (range.second * 60 * 60 * 1000L) - 1
+                    val qTxns = transactions.filter {
+                        it.transaction.timestamp in qStart..qEnd &&
+                                it.transaction.kind != TransactionKind.BANK_TRANSFER &&
+                                it.transaction.kind != TransactionKind.CARD_PAYMENT
+                    }
+                    val expense = qTxns.filter { it.transaction.direction == TransactionDirection.DEBIT }.map { it.transaction.amountMoney }.sumMoney().asDouble
+                    val income = qTxns.filter { it.transaction.direction == TransactionDirection.CREDIT }.map { it.transaction.amountMoney }.sumMoney().asDouble
+                    points.add(TrendPoint(label, expense, income))
+                }
+            }
+            TimePeriod.WEEKLY -> {
                 val df = SimpleDateFormat("EEE", Locale.getDefault())
                 for (i in 6 downTo 0) {
-                    val targetCal = Calendar.getInstance()
-                    targetCal.add(Calendar.DAY_OF_YEAR, -i)
-                    val label = df.format(targetCal.time)
-
-                    targetCal.set(Calendar.HOUR_OF_DAY, 0)
-                    targetCal.set(Calendar.MINUTE, 0)
-                    targetCal.set(Calendar.SECOND, 0)
-                    val start = targetCal.timeInMillis
-                    targetCal.set(Calendar.HOUR_OF_DAY, 23)
-                    targetCal.set(Calendar.MINUTE, 59)
-                    targetCal.set(Calendar.SECOND, 59)
-                    val end = targetCal.timeInMillis
+                    val targetDate = today.minusDays(i.toLong())
+                    val label = df.format(Date.from(targetDate.atStartOfDay(zoneId).toInstant()))
+                    val start = targetDate.atStartOfDay(zoneId).toInstant().toEpochMilli()
+                    val end = targetDate.plusDays(1).atStartOfDay(zoneId).toInstant().toEpochMilli() - 1
 
                     val dayTxns = transactions.filter {
                         it.transaction.timestamp in start..end &&
                                 it.transaction.kind != TransactionKind.BANK_TRANSFER &&
                                 it.transaction.kind != TransactionKind.CARD_PAYMENT
                     }
-                    val expense = dayTxns.filter { it.transaction.direction == TransactionDirection.DEBIT }.sumOf { it.transaction.amount }
-                    val income = dayTxns.filter { it.transaction.direction == TransactionDirection.CREDIT }.sumOf { it.transaction.amount }
+                    val expense = dayTxns.filter { it.transaction.direction == TransactionDirection.DEBIT }.map { it.transaction.amountMoney }.sumMoney().asDouble
+                    val income = dayTxns.filter { it.transaction.direction == TransactionDirection.CREDIT }.map { it.transaction.amountMoney }.sumMoney().asDouble
                     points.add(TrendPoint(label, expense, income))
                 }
             }
@@ -2317,8 +2334,8 @@ class AppDatabaseHelper(context: Context) :
                                 it.transaction.kind != TransactionKind.BANK_TRANSFER &&
                                 it.transaction.kind != TransactionKind.CARD_PAYMENT
                     }
-                    val expense = weekTxns.filter { it.transaction.direction == TransactionDirection.DEBIT }.sumOf { it.transaction.amount }
-                    val income = weekTxns.filter { it.transaction.direction == TransactionDirection.CREDIT }.sumOf { it.transaction.amount }
+                    val expense = weekTxns.filter { it.transaction.direction == TransactionDirection.DEBIT }.map { it.transaction.amountMoney }.sumMoney().asDouble
+                    val income = weekTxns.filter { it.transaction.direction == TransactionDirection.CREDIT }.map { it.transaction.amountMoney }.sumMoney().asDouble
                     points.add(TrendPoint(label, expense, income))
                 }
             }
@@ -2340,8 +2357,8 @@ class AppDatabaseHelper(context: Context) :
                                 it.transaction.kind != TransactionKind.BANK_TRANSFER &&
                                 it.transaction.kind != TransactionKind.CARD_PAYMENT
                     }
-                    val expense = monthTxns.filter { it.transaction.direction == TransactionDirection.DEBIT }.sumOf { it.transaction.amount }
-                    val income = monthTxns.filter { it.transaction.direction == TransactionDirection.CREDIT }.sumOf { it.transaction.amount }
+                    val expense = monthTxns.filter { it.transaction.direction == TransactionDirection.DEBIT }.map { it.transaction.amountMoney }.sumMoney().asDouble
+                    val income = monthTxns.filter { it.transaction.direction == TransactionDirection.CREDIT }.map { it.transaction.amountMoney }.sumMoney().asDouble
                     points.add(TrendPoint(label, expense, income))
                 }
             }
@@ -2818,6 +2835,7 @@ class AppDatabaseHelper(context: Context) :
         val cursor = db.query(TABLE_USERS, null, null, null, null, null, "$COL_USER_CREATED ASC")
         cursor.use { c ->
             val bioIdx = c.getColumnIndex(COL_USER_BIOMETRIC)
+            val kdfIdx = c.getColumnIndex(COL_USER_PIN_KDF_VERSION)
             val updIdx = c.getColumnIndex(COL_USER_UPDATED)
             while (c.moveToNext()) {
                 val id = c.getString(c.getColumnIndexOrThrow(COL_USER_ID))
@@ -2827,6 +2845,7 @@ class AppDatabaseHelper(context: Context) :
                 val color = c.getLong(c.getColumnIndexOrThrow(COL_USER_COLOR))
                 val isActive = c.getInt(c.getColumnIndexOrThrow(COL_USER_IS_ACTIVE)) == 1
                 val isBio = if (bioIdx != -1) c.getInt(bioIdx) == 1 else false
+                val kdfVer = if (kdfIdx != -1) c.getInt(kdfIdx) else 1
                 val created = c.getLong(c.getColumnIndexOrThrow(COL_USER_CREATED))
                 val updated = if (updIdx != -1) c.getLong(updIdx) else created
 
@@ -2843,7 +2862,7 @@ class AppDatabaseHelper(context: Context) :
                     } catch (_: Exception) {}
                 }
 
-                list.add(User(id, name, email, phone, color, isActive, isBio, created, updated))
+                list.add(User(id, name, email, phone, color, isActive, isBio, kdfVer, created, updated))
             }
         }
         if (list.isEmpty()) {
@@ -2862,6 +2881,7 @@ class AppDatabaseHelper(context: Context) :
             put(COL_USER_COLOR, user.colorHex)
             put(COL_USER_IS_ACTIVE, if (user.isActive) 1 else 0)
             put(COL_USER_BIOMETRIC, if (user.isBiometricEnabled) 1 else 0)
+            put(COL_USER_PIN_KDF_VERSION, user.pinKdfVersion)
             put(COL_USER_CREATED, user.createdAt)
             put(COL_USER_UPDATED, user.updatedAt)
         }
@@ -2879,6 +2899,7 @@ class AppDatabaseHelper(context: Context) :
             put(COL_USER_COLOR, user.colorHex)
             put(COL_USER_IS_ACTIVE, if (user.isActive) 1 else 0)
             put(COL_USER_BIOMETRIC, if (user.isBiometricEnabled) 1 else 0)
+            put(COL_USER_PIN_KDF_VERSION, user.pinKdfVersion)
             put(COL_USER_UPDATED, System.currentTimeMillis())
         }
         val rows = db.update(TABLE_USERS, values, "$COL_USER_ID = ?", arrayOf(user.id))

@@ -58,6 +58,8 @@ class MainActivity : FragmentActivity() {
         setContent {
             val themeManager = remember { ThemePreferenceManager(this) }
             val themeMode by themeManager.themeMode.collectAsState()
+            val glassPreset by themeManager.glassPreset.collectAsState()
+            val currencySymbol by themeManager.currencySymbol.collectAsState()
             val systemDark = isSystemInDarkTheme()
             val isDark = when (themeMode) {
                 ThemeMode.DARK -> true
@@ -69,12 +71,17 @@ class MainActivity : FragmentActivity() {
                 mutableStateOf(needsSmsPermission(this))
             }
 
-            FinTrackTheme(darkTheme = isDark) {
+            FinTrackTheme(
+                darkTheme = isDark,
+                glassPreset = glassPreset,
+                currencySymbol = currencySymbol
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
                     MainAppShell(
+                        themeManager = themeManager,
                         isDark = isDark,
                         onToggleDarkMode = { themeManager.toggleDarkMode() }
                     )

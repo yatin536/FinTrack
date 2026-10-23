@@ -2,9 +2,9 @@ package com.example.fintrack.engine
 
 import com.example.fintrack.data.local.AppDatabaseHelper
 import com.example.fintrack.data.model.Account
+import com.example.fintrack.data.model.Money
 import com.example.fintrack.data.model.ReconciliationLog
 import java.util.UUID
-import kotlin.math.abs
 
 data class ReconciliationResult(
     val accountId: String,
@@ -13,7 +13,11 @@ data class ReconciliationResult(
     val discrepancy: Double,
     val wasAdjusted: Boolean,
     val log: ReconciliationLog?
-)
+) {
+    val ledgerBalanceMoney: Money get() = Money.fromDouble(ledgerBalance)
+    val confirmedBalanceMoney: Money get() = Money.fromDouble(confirmedBalance)
+    val discrepancyMoney: Money get() = Money.fromDouble(discrepancy)
+}
 
 /**
  * Intelligent Balance & Credit Limit Reconciliation Engine.
@@ -31,15 +35,16 @@ class BalanceReconciliationEngine(private val dbHelper: AppDatabaseHelper) {
         officialBalance: Double,
         smsTimestamp: Long = System.currentTimeMillis()
     ): ReconciliationResult {
-        val ledgerBalance = account.currentBalance
-        val discrepancy = officialBalance - ledgerBalance
+        val ledgerMoney = account.currentBalanceMoney
+        val officialMoney = Money.fromDouble(officialBalance)
+        val discrepancyMoney = officialMoney - ledgerMoney
 
-        // If discrepancy is within 1 paisa (0.01), treat as in sync
-        if (abs(discrepancy) < 0.01) {
+        // If discrepancy is exactly 0 paise, treat as completely in sync
+        if (discrepancyMoney.isZero) {
             return ReconciliationResult(
                 accountId = account.id,
-                ledgerBalance = ledgerBalance,
-                confirmedBalance = officialBalance,
+                ledgerBalance = ledgerMoney.asDouble,
+                confirmedBalance = officialMoney.asDouble,
                 discrepancy = 0.0,
                 wasAdjusted = false,
                 log = null
@@ -50,27 +55,27 @@ class BalanceReconciliationEngine(private val dbHelper: AppDatabaseHelper) {
         val log = ReconciliationLog(
             id = UUID.randomUUID().toString(),
             accountId = account.id,
-            ledgerBalance = ledgerBalance,
-            confirmedBalance = officialBalance,
-            discrepancy = discrepancy,
-            adjustmentAmount = discrepancy,
+            ledgerBalance = ledgerMoney.asDouble,
+            confirmedBalance = officialMoney.asDouble,
+            discrepancy = discrepancyMoney.asDouble,
+            adjustmentAmount = discrepancyMoney.asDouble,
             timestamp = smsTimestamp,
             note = if (account.isCreditCard) {
-                "Reconciled card outstanding from ₹${String.format("%.2f", ledgerBalance)} to confirmed ₹${String.format("%.2f", officialBalance)}"
+                "Reconciled card outstanding from ${ledgerMoney.format()} to confirmed ${officialMoney.format()}"
             } else {
-                "Reconciled bank balance from ₹${String.format("%.2f", ledgerBalance)} to official Avl Bal ₹${String.format("%.2f", officialBalance)}"
+                "Reconciled bank balance from ${ledgerMoney.format()} to official Avl Bal ${officialMoney.format()}"
             }
         )
 
         // Record in database and update account's current balance
         dbHelper.recordReconciliation(log)
-        dbHelper.updateCurrentBalance(account.id, officialBalance)
+        dbHelper.updateCurrentBalance(account.id, officialMoney.asDouble)
 
         return ReconciliationResult(
             accountId = account.id,
-            ledgerBalance = ledgerBalance,
-            confirmedBalance = officialBalance,
-            discrepancy = discrepancy,
+            ledgerBalance = ledgerMoney.asDouble,
+            confirmedBalance = officialMoney.asDouble,
+            discrepancy = discrepancyMoney.asDouble,
             wasAdjusted = true,
             log = log
         )

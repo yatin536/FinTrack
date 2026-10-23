@@ -132,4 +132,16 @@ data class Account(
         } else {
             name
         }
+
+    // Exact Monetary properties
+    val initialBalanceMoney: Money get() = Money.fromDouble(initialBalance)
+    val currentBalanceMoney: Money get() = Money.fromDouble(currentBalance)
+    val creditLimitMoney: Money get() = Money.fromDouble(creditLimit)
+    val availableCreditMoney: Money? get() = availableCredit?.let { Money.fromDouble(it) }
+    val minimumDueMoney: Money? get() = minimumDue?.let { Money.fromDouble(it) }
+    val totalDueMoney: Money? get() = totalDue?.let { Money.fromDouble(it) }
+    val lastConfirmedBalanceMoney: Money? get() = lastConfirmedBalance?.let { Money.fromDouble(it) }
+    val outstandingBalanceMoney: Money get() = Money.fromDouble(outstandingBalance)
+    val limitLeftMoney: Money get() = Money.fromDouble(limitLeft)
+    val limitUsedMoney: Money get() = Money.fromDouble(limitUsed)
 }

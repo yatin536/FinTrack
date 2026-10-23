@@ -94,6 +94,15 @@ data class Transaction(
     // Backward-compatible property alias
     val type: TransactionDirection
         get() = direction
+
+    val amountMoney: Money
+        get() = Money.fromDouble(amount)
+
+    val balanceAfterTxnMoney: Money?
+        get() = balanceAfterTxn?.let { Money.fromDouble(it) }
+
+    val availableCreditAfterTxnMoney: Money?
+        get() = availableCreditAfterTxn?.let { Money.fromDouble(it) }
 }
 
 data class TransactionWithDetails(

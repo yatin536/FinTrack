@@ -4,6 +4,9 @@ import com.example.fintrack.data.local.AppDatabaseHelper
 import com.example.fintrack.data.model.Account
 import com.example.fintrack.data.model.AccountType
 import com.example.fintrack.data.model.BillStatus
+import com.example.fintrack.data.model.Money
+import com.example.fintrack.data.model.sumMoney
+import com.example.fintrack.data.model.toMoney
 import com.example.fintrack.data.model.Transaction
 import com.example.fintrack.data.model.TransactionDirection
 import com.example.fintrack.data.model.User
@@ -48,7 +51,7 @@ data class IntelligenceAnswer(
 
 class FinancialIntelligenceEngine(private val dbHelper: AppDatabaseHelper) {
 
-    private val currencyFormat = NumberFormat.getCurrencyInstance(Locale("en", "IN"))
+    private fun formatAmount(amount: Double?): String = Money.fromDouble(amount ?: 0.0).format()
 
     fun generateInsights(userId: String = User.DEFAULT_USER_ID): List<FinancialInsight> {
         val insights = mutableListOf<FinancialInsight>()
@@ -70,12 +73,12 @@ class FinancialIntelligenceEngine(private val dbHelper: AppDatabaseHelper) {
                     insights.add(
                         FinancialInsight(
                             title = "High Credit Utilization on ${card.name}",
-                            summary = "You have used ${"%.1f".format(utilizationRate)}% of your credit limit (${currencyFormat.format(used)} of ${currencyFormat.format(limit)}). Keeping utilization under 30% helps maintain a strong credit profile.",
+                            summary = "You have used ${"%.1f".format(utilizationRate)}% of your credit limit (${formatAmount(used)} of ${formatAmount(limit)}). Keeping utilization under 30% helps maintain a strong credit profile.",
                             category = InsightCategory.CREDIT_UTILIZATION,
                             severity = InsightSeverity.WARNING,
                             groundedMetrics = mapOf(
-                                "Limit" to currencyFormat.format(limit),
-                                "Utilized" to currencyFormat.format(used),
+                                "Limit" to formatAmount(limit),
+                                "Utilized" to formatAmount(used),
                                 "Ratio" to "${"%.1f".format(utilizationRate)}%"
                             )
                         )
@@ -84,12 +87,12 @@ class FinancialIntelligenceEngine(private val dbHelper: AppDatabaseHelper) {
                     insights.add(
                         FinancialInsight(
                             title = "Healthy Credit Utilization on ${card.name}",
-                            summary = "Your credit card utilization is at a healthy ${"%.1f".format(utilizationRate)}% (${currencyFormat.format(used)} used).",
+                            summary = "Your credit card utilization is at a healthy ${"%.1f".format(utilizationRate)}% (${formatAmount(used)} used).",
                             category = InsightCategory.CREDIT_UTILIZATION,
                             severity = InsightSeverity.SUCCESS,
                             groundedMetrics = mapOf(
                                 "Ratio" to "${"%.1f".format(utilizationRate)}%",
-                                "Available" to currencyFormat.format(card.availableCredit ?: (limit - used))
+                                "Available" to formatAmount(card.availableCredit ?: (limit - used))
                             )
                         )
                     )
@@ -103,12 +106,12 @@ class FinancialIntelligenceEngine(private val dbHelper: AppDatabaseHelper) {
                     insights.add(
                         FinancialInsight(
                             title = "Bill Overdue for ${card.name}",
-                            summary = "Your credit card bill of ${currencyFormat.format(card.totalDue)} was reported due on $dueDateStr. Please verify if payment has been made.",
+                            summary = "Your credit card bill of ${formatAmount(card.totalDue)} was reported due on $dueDateStr. Please verify if payment has been made.",
                             category = InsightCategory.UPCOMING_BILL,
                             severity = InsightSeverity.CRITICAL,
                             actionText = "Mark Bill Paid",
                             groundedMetrics = mapOf(
-                                "Amount Due" to currencyFormat.format(card.totalDue),
+                                "Amount Due" to formatAmount(card.totalDue),
                                 "Due Date" to dueDateStr,
                                 "Status" to "OVERDUE"
                             )
@@ -118,12 +121,12 @@ class FinancialIntelligenceEngine(private val dbHelper: AppDatabaseHelper) {
                     insights.add(
                         FinancialInsight(
                             title = "Bill Due: ${card.name}",
-                            summary = "Total bill amount of ${currencyFormat.format(card.totalDue)} is reported due on $dueDateStr. Ensure sufficient balance in your bank account.",
+                            summary = "Total bill amount of ${formatAmount(card.totalDue)} is reported due on $dueDateStr. Ensure sufficient balance in your bank account.",
                             category = InsightCategory.UPCOMING_BILL,
                             severity = InsightSeverity.WARNING,
                             actionText = "Mark Bill Paid",
                             groundedMetrics = mapOf(
-                                "Amount Due" to currencyFormat.format(card.totalDue),
+                                "Amount Due" to formatAmount(card.totalDue),
                                 "Due Date" to dueDateStr,
                                 "Status" to card.billStatus.name
                             )
@@ -160,12 +163,12 @@ class FinancialIntelligenceEngine(private val dbHelper: AppDatabaseHelper) {
                 insights.add(
                     FinancialInsight(
                         title = "Monthly Spending Trend",
-                        summary = "Your expenses over the last 30 days total ${currencyFormat.format(currentSpend)}, which has $trend compared to the prior 30-day window (${currencyFormat.format(priorSpend)}).",
+                        summary = "Your expenses over the last 30 days total ${formatAmount(currentSpend)}, which has $trend compared to the prior 30-day window (${formatAmount(priorSpend)}).",
                         category = InsightCategory.SPENDING_TREND,
                         severity = if (diffPercent > 15) InsightSeverity.WARNING else InsightSeverity.INFO,
                         groundedMetrics = mapOf(
-                            "Last 30 Days" to currencyFormat.format(currentSpend),
-                            "Prior 30 Days" to currencyFormat.format(priorSpend),
+                            "Last 30 Days" to formatAmount(currentSpend),
+                            "Prior 30 Days" to formatAmount(priorSpend),
                             "Change" to "${if (diffPercent >= 0) "+" else ""}${"%.1f".format(diffPercent)}%"
                         )
                     )
@@ -175,12 +178,12 @@ class FinancialIntelligenceEngine(private val dbHelper: AppDatabaseHelper) {
             insights.add(
                 FinancialInsight(
                     title = "Top Spending Category: $topCategoryName",
-                    summary = "Your highest spending in the last 30 days was in $topCategoryName, accounting for ${currencyFormat.format(topCategoryAmount)} (${"%.1f".format((topCategoryAmount / currentSpend) * 100)}% of total expenses).",
+                    summary = "Your highest spending in the last 30 days was in $topCategoryName, accounting for ${formatAmount(topCategoryAmount)} (${"%.1f".format((topCategoryAmount / currentSpend) * 100)}% of total expenses).",
                     category = InsightCategory.CASH_FLOW,
                     severity = InsightSeverity.INFO,
                     groundedMetrics = mapOf(
                         "Category" to topCategoryName,
-                        "Amount" to currencyFormat.format(topCategoryAmount),
+                        "Amount" to formatAmount(topCategoryAmount),
                         "Share" to "${"%.1f".format((topCategoryAmount / currentSpend) * 100)}%"
                     )
                 )
@@ -221,16 +224,16 @@ class FinancialIntelligenceEngine(private val dbHelper: AppDatabaseHelper) {
         return when {
             // Net worth / Total balance
             q.contains("net worth") || q.contains("total balance") || q.contains("how much money") -> {
-                val bankTotal = accounts.filter { it.accountType != AccountType.CREDIT_CARD }.sumOf { it.currentBalance }
-                val ccOutstanding = accounts.filter { it.accountType == AccountType.CREDIT_CARD }.sumOf { it.currentBalance }
+                val bankTotal = accounts.filter { it.accountType != AccountType.CREDIT_CARD }.map { it.currentBalanceMoney }.sumMoney()
+                val ccOutstanding = accounts.filter { it.accountType == AccountType.CREDIT_CARD }.map { it.currentBalanceMoney }.sumMoney()
                 val net = bankTotal - ccOutstanding
                 IntelligenceAnswer(
                     query = query,
-                    answer = "Your calculated net position is ${currencyFormat.format(net)}. You have ${currencyFormat.format(bankTotal)} in bank & liquid accounts, and ${currencyFormat.format(ccOutstanding)} in credit card liabilities.",
+                    answer = "Your calculated net position is ${net.format()}. You have ${bankTotal.format()} in bank & liquid accounts, and ${ccOutstanding.format()} in credit card liabilities.",
                     supportingData = listOf(
-                        "Bank Balances" to currencyFormat.format(bankTotal),
-                        "Card Liabilities" to currencyFormat.format(ccOutstanding),
-                        "Net Financial Position" to currencyFormat.format(net)
+                        "Bank Balances" to bankTotal.format(),
+                        "Card Liabilities" to ccOutstanding.format(),
+                        "Net Financial Position" to net.format()
                     )
                 )
             }
@@ -241,15 +244,15 @@ class FinancialIntelligenceEngine(private val dbHelper: AppDatabaseHelper) {
                 if (ccAccounts.isEmpty()) {
                     IntelligenceAnswer(query, "You currently have no credit cards registered in FinTrack.")
                 } else {
-                    val totalDue = ccAccounts.sumOf { it.totalDue ?: it.currentBalance }
+                    val totalDue = ccAccounts.map { it.totalDueMoney ?: it.currentBalanceMoney }.sumMoney()
                     val details = ccAccounts.map { card ->
                         val dueStr = card.paymentDueDate ?: "No date"
-                        "${card.name}: ${currencyFormat.format(card.totalDue ?: card.currentBalance)} (Due: $dueStr)"
+                        "${card.name}: ${(card.totalDueMoney ?: card.currentBalanceMoney).format()} (Due: $dueStr)"
                     }.joinToString("; ")
                     IntelligenceAnswer(
                         query = query,
-                        answer = "Total outstanding dues across ${ccAccounts.size} card(s) is ${currencyFormat.format(totalDue)}. Breakdown: $details.",
-                        supportingData = ccAccounts.map { it.name to currencyFormat.format(it.totalDue ?: it.currentBalance) }
+                        answer = "Total outstanding dues across ${ccAccounts.size} card(s) is ${totalDue.format()}. Breakdown: $details.",
+                        supportingData = ccAccounts.map { it.name to (it.totalDueMoney ?: it.currentBalanceMoney).format() }
                     )
                 }
             }
@@ -264,16 +267,16 @@ class FinancialIntelligenceEngine(private val dbHelper: AppDatabaseHelper) {
                 }
                 val startOfMonth = cal.timeInMillis
                 val monthlyDebits: List<Transaction> = transactions.filter { it.timestamp >= startOfMonth && it.direction == TransactionDirection.DEBIT }
-                val totalSpent = monthlyDebits.sumOf { it.amount }
-                val topMerchantEntry = monthlyDebits.groupBy { it.merchant ?: "Unknown" }
-                    .maxByOrNull { entry -> entry.value.sumOf { t -> t.amount } }
+                val totalSpent = monthlyDebits.map { it.amountMoney }.sumMoney()
+                val topMerchantEntry = monthlyDebits.groupBy { it.merchant }
+                    .maxByOrNull { entry -> entry.value.map { t -> t.amountMoney }.sumMoney() }
 
-                val topMerchantStr = topMerchantEntry?.let { "${it.key} (${currencyFormat.format(it.value.sumOf { t -> t.amount })})" } ?: "None"
+                val topMerchantStr = topMerchantEntry?.let { "${it.key} (${it.value.map { t -> t.amountMoney }.sumMoney().format()})" } ?: "None"
                 IntelligenceAnswer(
                     query = query,
-                    answer = "You have spent ${currencyFormat.format(totalSpent)} across ${monthlyDebits.size} debit transaction(s) this month. Your top payee is $topMerchantStr.",
+                    answer = "You have spent ${totalSpent.format()} across ${monthlyDebits.size} debit transaction(s) this month. Your top payee is $topMerchantStr.",
                     supportingData = listOf(
-                        "Month-to-Date Spend" to currencyFormat.format(totalSpent),
+                        "Month-to-Date Spend" to totalSpent.format(),
                         "Transaction Count" to "${monthlyDebits.size}",
                         "Top Payee" to topMerchantStr
                     )
@@ -290,26 +293,26 @@ class FinancialIntelligenceEngine(private val dbHelper: AppDatabaseHelper) {
                 } else {
                     val summary = largest.mapIndexed { idx: Int, t: Transaction ->
                         val date = SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(t.timestamp))
-                        "#${idx + 1}: ${currencyFormat.format(t.amount)} at ${t.merchant ?: "Unknown"} on $date"
+                        "#${idx + 1}: ${t.amountMoney.format()} at ${t.merchant} on $date"
                     }.joinToString("\n")
                     IntelligenceAnswer(
                         query = query,
                         answer = "Here are your top 3 largest transactions on record:\n$summary",
-                        supportingData = largest.map { (it.merchant ?: "Payment") to currencyFormat.format(it.amount) }
+                        supportingData = largest.map { it.merchant to it.amountMoney.format() }
                     )
                 }
             }
 
             // Default fallback with summary stats
             else -> {
-                val bankTotal = accounts.filter { it.accountType != AccountType.CREDIT_CARD }.sumOf { it.currentBalance }
+                val bankTotal = accounts.filter { it.accountType != AccountType.CREDIT_CARD }.map { it.currentBalanceMoney }.sumMoney()
                 IntelligenceAnswer(
                     query = query,
-                    answer = "Based on your local financial ledger: you have ${accounts.size} account(s) tracked with a liquid balance of ${currencyFormat.format(bankTotal)} and ${transactions.size} total recorded transactions. Ask me about your 'credit card dues', 'this month spend', 'net worth', or 'largest expenses'.",
+                    answer = "Based on your local financial ledger: you have ${accounts.size} account(s) tracked with a liquid balance of ${bankTotal.format()} and ${transactions.size} total recorded transactions. Ask me about your 'credit card dues', 'this month spend', 'net worth', or 'largest expenses'.",
                     supportingData = listOf(
                         "Accounts Count" to "${accounts.size}",
                         "Transactions Count" to "${transactions.size}",
-                        "Liquid Balance" to currencyFormat.format(bankTotal)
+                        "Liquid Balance" to bankTotal.format()
                     )
                 )
             }

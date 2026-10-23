@@ -3,6 +3,7 @@ package com.example.fintrack.engine
 import com.example.fintrack.data.local.AppDatabaseHelper
 import com.example.fintrack.data.model.Account
 import com.example.fintrack.data.model.AccountType
+import com.example.fintrack.data.model.Money
 import com.example.fintrack.data.model.Transaction
 import com.example.fintrack.data.model.TransactionDirection
 import com.example.fintrack.data.model.TransactionKind
@@ -64,7 +65,7 @@ class CreditCardPaymentEngine(private val dbHelper: AppDatabaseHelper? = null) {
                 needsSourceConfirmation = false,
                 transaction = reconciledTxn,
                 wasReconciledWithManual = true,
-                reconciliationMessage = "Payment of ₹${"%.2f".format(parsed.amount)} reconciled with your previous manual bill payment confirmation."
+                reconciliationMessage = "Payment of ${Money.fromDouble(parsed.amount).format()} reconciled with your previous manual bill payment confirmation."
             )
         }
 
@@ -117,7 +118,7 @@ class CreditCardPaymentEngine(private val dbHelper: AppDatabaseHelper? = null) {
                 userId = creditCard.userId,
                 eventType = VerificationEventType.CREDIT_CARD_PAYMENT,
                 title = "Payment to ${creditCard.name}",
-                description = "Received SMS confirmation for payment of ₹${"%.2f".format(parsed.amount)} towards card ending in ${creditCard.accountNumberLast4}. Please confirm which bank account was used.",
+                description = "Received SMS confirmation for payment of ${Money.fromDouble(parsed.amount).format()} towards card ending in ${creditCard.accountNumberLast4}. Please confirm which bank account was used.",
                 amount = parsed.amount,
                 accountLast4 = creditCard.accountNumberLast4,
                 status = VerificationStatus.PENDING,
